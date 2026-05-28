@@ -2,6 +2,10 @@ import type { CanonicalFill, FillSide } from "@/lib/trades/types";
 
 type TradeZeroFillPayload = Record<string, unknown>;
 
+export function isExecutableTradeZeroFillPayload(payload: TradeZeroFillPayload) {
+  return !isCanceled(payload) && optionalNumberField(payload, ["qty", "quantity"]) != null;
+}
+
 export function normalizeTradeZeroFill(input: {
   userId: string;
   accountId: string;
@@ -9,7 +13,7 @@ export function normalizeTradeZeroFill(input: {
   payload: TradeZeroFillPayload;
 }): CanonicalFill {
   const sourceFillId = stringField(input.payload, ["tradeId", "executionId", "id"]);
-  const executedAt = dateField(input.payload, ["executedAt", "executionTime", "time"]);
+  const executedAt = executionDate(input.payload);
 
   return {
     id: sourceFillId,
@@ -101,8 +105,49 @@ function optionalNumberField(
   return undefined;
 }
 
-function dateField(payload: TradeZeroFillPayload, keys: string[]) {
-  const raw = stringField(payload, keys);
+function isCanceled(payload: TradeZeroFillPayload) {
+  const value = payload.canceled;
+
+  if (typeof value === "boolean") {
+    return value;
+  }
+  if (typeof value === "string") {
+    return value.trim().toLowerCase() === "true";
+  }
+
+  return false;
+}
+
+function executionDate(payload: TradeZeroFillPayload) {
+  const direct = optionalStringField(payload, ["executedAt", "executionTime", "time"]);
+  if (direct) {
+    return parseDate(direct);
+  }
+
+  const tradeDate = optionalStringField(payload, ["tradeDate", "entryDate"]);
+  const execTime = optionalStringField(payload, ["execTime"]);
+  if (tradeDate && execTime) {
+    return easternWallTimeToUtc(tradeDate, execTime);
+  }
+
+  throw new Error("Missing TradeZero execution timestamp");
+}
+
+function optionalStringField(payload: TradeZeroFillPayload, keys: string[]) {
+  for (const key of keys) {
+    const value = payload[key];
+    if (typeof value === "string" && value.trim().length > 0) {
+      return value.trim();
+    }
+    if (typeof value === "number") {
+      return String(value);
+    }
+  }
+
+  return undefined;
+}
+
+function parseDate(raw: string) {
   const date = new Date(raw);
 
   if (Number.isNaN(date.valueOf())) {
@@ -112,12 +157,72 @@ function dateField(payload: TradeZeroFillPayload, keys: string[]) {
   return date;
 }
 
+function easternWallTimeToUtc(rawDate: string, rawTime: string) {
+  const dateMatch = rawDate.match(/^(\d{4})-(\d{2})-(\d{2})/);
+  const timeMatch = rawTime.match(/^(\d{2}):(\d{2}):(\d{2})/);
+
+  if (!dateMatch || !timeMatch) {
+    throw new Error(`Invalid TradeZero execution timestamp: ${rawDate} ${rawTime}`);
+  }
+
+  const [, year, month, day] = dateMatch;
+  const [, hour, minute, second] = timeMatch;
+  const wallTimeAsUtc = new Date(
+    Date.UTC(
+      Number(year),
+      Number(month) - 1,
+      Number(day),
+      Number(hour),
+      Number(minute),
+      Number(second),
+    ),
+  );
+  const offsetMs = getTimeZoneOffsetMs(wallTimeAsUtc, "America/New_York");
+
+  return new Date(wallTimeAsUtc.getTime() - offsetMs);
+}
+
+function getTimeZoneOffsetMs(date: Date, timeZone: string) {
+  const parts = new Intl.DateTimeFormat("en-US", {
+    timeZone,
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+    hour: "2-digit",
+    minute: "2-digit",
+    second: "2-digit",
+    hour12: false,
+  }).formatToParts(date);
+  const values = Object.fromEntries(parts.map((part) => [part.type, part.value]));
+  const localAsUtc = Date.UTC(
+    Number(values.year),
+    Number(values.month) - 1,
+    Number(values.day),
+    Number(values.hour),
+    Number(values.minute),
+    Number(values.second),
+  );
+
+  return localAsUtc - date.getTime();
+}
+
 function normalizeSide(side: string): FillSide {
-  const normalized = side.toUpperCase();
-  if (normalized === "B" || normalized === "BUY") {
+  const normalized = side
+    .trim()
+    .toUpperCase()
+    .replace(/[_-]+/g, " ")
+    .replace(/\s+/g, " ");
+  const compact = normalized.replaceAll(" ", "");
+
+  if (["B", "BUY", "COVER", "BUY TO COVER", "BUYTOCOVER"].includes(normalized)) {
     return "BUY";
   }
-  if (normalized === "S" || normalized === "SELL") {
+  if (
+    ["S", "SELL", "SHORT", "SELL SHORT", "SHORT SELL", "SELLSHORT", "SHORTSELL"].includes(
+      normalized,
+    ) ||
+    ["BUYTOCOVER", "SELLSHORT", "SHORTSELL"].includes(compact)
+  ) {
     return "SELL";
   }
 

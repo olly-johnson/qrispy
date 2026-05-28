@@ -85,7 +85,14 @@ function normalizeEnvelope(json: unknown) {
 
   if (json && typeof json === "object") {
     const envelope = json as Record<string, unknown>;
-    for (const key of ["accounts", "positions", "orders", "items", "results"]) {
+    for (const key of [
+      "accounts",
+      "positions",
+      "orders",
+      "tradingHistory",
+      "items",
+      "results",
+    ]) {
       if (Array.isArray(envelope[key])) {
         return envelope[key];
       }

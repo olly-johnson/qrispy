@@ -1,4 +1,7 @@
-import { normalizeTradeZeroFill } from "@/lib/tradezero/normalize";
+import {
+  isExecutableTradeZeroFillPayload,
+  normalizeTradeZeroFill,
+} from "@/lib/tradezero/normalize";
 import {
   getTradeZeroAccountDisplayName,
   getTradeZeroAccountId,
@@ -124,7 +127,7 @@ export async function runTradeZeroSync(input: SyncInput) {
       });
 
       const accountFills = orders
-        .filter((order) => hasFillQuantity(order))
+        .filter((order) => isExecutableTradeZeroFillPayload(order))
         .map((payload) =>
           normalizeTradeZeroFill({
             userId: input.userId,
@@ -206,10 +209,6 @@ async function persistReconstructedTrades(fills: CanonicalFill[]) {
       { onConflict: "user_id,reconstruction_key" },
     );
   }
-}
-
-function hasFillQuantity(payload: Record<string, unknown>) {
-  return numberFrom(payload, ["qty", "quantity"]) != null;
 }
 
 function numberFrom(

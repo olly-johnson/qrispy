@@ -36,6 +36,44 @@ describe("TradeZeroClient", () => {
       },
     ]);
   });
+
+  it("reads historical orders from the documented trading history envelope", async () => {
+    vi.stubEnv("TRADEZERO_READ_ONLY_CONFIRMED", "true");
+    vi.stubEnv("TRADEZERO_BROKER_2FA_CONFIRMED", "true");
+    const fetcher = vi.fn().mockResolvedValue(
+      jsonResponse({
+        pagination: {
+          currentLimit: 100,
+          currentOffset: 0,
+          totalRecords: 1,
+        },
+        tradingHistory: [
+          {
+            tradeId: 9001,
+            symbol: "AAPL",
+            side: "Buy",
+            qty: 15,
+            price: 180.25,
+          },
+        ],
+      }),
+    );
+
+    const orders = await new TradeZeroClient(config, fetcher).listHistoricalOrders({
+      accountId: "TZP12345678",
+      startDate: "2026-01-01",
+    });
+
+    expect(orders).toEqual([
+      {
+        tradeId: 9001,
+        symbol: "AAPL",
+        side: "Buy",
+        qty: 15,
+        price: 180.25,
+      },
+    ]);
+  });
 });
 
 function jsonResponse(body: unknown) {
