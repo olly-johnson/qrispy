@@ -1,4 +1,8 @@
 import { getTradeZeroConfig } from "@/lib/env";
+import {
+  assertTradeZeroReadOnlyRequest,
+  assertTradeZeroSafetyConfirmed,
+} from "@/lib/tradezero/safety";
 
 type JsonObject = Record<string, unknown>;
 
@@ -54,7 +58,11 @@ export class TradeZeroClient {
       throw new Error("TradeZero credentials are not configured");
     }
 
+    assertTradeZeroSafetyConfirmed();
+    assertTradeZeroReadOnlyRequest({ method: "GET", path });
+
     const response = await this.fetcher(`${this.config.baseUrl}${path}`, {
+      method: "GET",
       headers: {
         "TZ-API-KEY-ID": this.config.apiKeyId,
         "TZ-API-SECRET-KEY": this.config.apiSecretKey,
