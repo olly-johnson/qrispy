@@ -4,6 +4,10 @@ import {
   getTradeZeroAccountId,
 } from "@/lib/tradezero/account";
 import { TradeZeroClient } from "@/lib/tradezero/client";
+import {
+  buildTradeZeroPortfolioSnapshot,
+  buildTradeZeroPositionSnapshot,
+} from "@/lib/tradezero/snapshot";
 import { reconstructTrades } from "@/lib/trades/reconstruct";
 import type { CanonicalFill } from "@/lib/trades/types";
 import { createSupabaseAdminClient } from "@/lib/supabase/server";
@@ -63,37 +67,52 @@ export async function runTradeZeroSync(input: SyncInput) {
       const accountId = account.id as string;
       const snapshotAt = new Date().toISOString();
       const pnl = await tradeZero.getAccountPnl(brokerAccountId);
+      const positions = await tradeZero.listPositions(brokerAccountId);
+      const positionSnapshots = positions.map((position) =>
+        buildTradeZeroPositionSnapshot({ pnl, position }),
+      );
+      const portfolioSnapshot = buildTradeZeroPortfolioSnapshot({
+        pnl,
+        positionSnapshots,
+      });
+
       await supabase.from("account_portfolio_snapshots").upsert(
         {
           user_id: input.userId,
           account_id: accountId,
           snapshot_at: snapshotAt,
           snapshot_date: snapshotAt.slice(0, 10),
-          equity: numberFrom(pnl, ["equity", "accountValue"]),
-          cash: numberFrom(pnl, ["cash", "cashBalance"]),
+          equity: portfolioSnapshot.equity,
+          cash: portfolioSnapshot.cash,
           buying_power: numberFrom(pnl, ["buyingPower", "buying_power"]),
-          realized_pnl: numberFrom(pnl, ["realizedPnl", "realized_pnl"]),
+          long_market_value: portfolioSnapshot.longMarketValue,
+          short_market_value: portfolioSnapshot.shortMarketValue,
+          gross_exposure: portfolioSnapshot.grossExposure,
+          net_exposure: portfolioSnapshot.netExposure,
+          percent_invested: portfolioSnapshot.percentInvested,
+          day_pnl: portfolioSnapshot.dayPnl,
+          unrealized_pnl: portfolioSnapshot.unrealizedPnl,
+          realized_pnl: portfolioSnapshot.realizedPnl,
           source: "tradezero",
           raw_payload: pnl,
         },
         { onConflict: "account_id,snapshot_at,source" },
       );
 
-      const positions = await tradeZero.listPositions(brokerAccountId);
-      if (positions.length > 0) {
+      if (positionSnapshots.length > 0) {
         await supabase.from("broker_position_snapshots").upsert(
-          positions.map((position) => ({
+          positionSnapshots.map((positionSnapshot, index) => ({
             user_id: input.userId,
             account_id: accountId,
             snapshot_at: snapshotAt,
-            symbol: stringFrom(position, ["symbol"]).toUpperCase(),
-            quantity: numberFrom(position, ["quantity", "qty"], 0),
-            average_price: numberFrom(position, ["averagePrice", "avgPrice"]),
-            last_price: numberFrom(position, ["lastPrice", "price"]),
-            market_value: numberFrom(position, ["marketValue", "market_value"]),
-            unrealized_pnl: numberFrom(position, ["unrealizedPnl", "unrealized_pnl"]),
+            symbol: positionSnapshot.symbol,
+            quantity: positionSnapshot.quantity,
+            average_price: positionSnapshot.averagePrice,
+            last_price: positionSnapshot.lastPrice,
+            market_value: positionSnapshot.marketValue,
+            unrealized_pnl: positionSnapshot.unrealizedPnl,
             currency: "USD",
-            raw_payload: position,
+            raw_payload: positions[index],
           })),
           { onConflict: "account_id,snapshot_at,symbol,asset_class" },
         );
@@ -191,28 +210,6 @@ async function persistReconstructedTrades(fills: CanonicalFill[]) {
 
 function hasFillQuantity(payload: Record<string, unknown>) {
   return numberFrom(payload, ["qty", "quantity"]) != null;
-}
-
-function stringFrom(
-  payload: Record<string, unknown>,
-  keys: string[],
-  fallback?: string,
-) {
-  for (const key of keys) {
-    const value = payload[key];
-    if (typeof value === "string" && value.trim()) {
-      return value.trim();
-    }
-    if (typeof value === "number") {
-      return String(value);
-    }
-  }
-
-  if (fallback != null) {
-    return fallback;
-  }
-
-  throw new Error(`Missing field: ${keys.join(" or ")}`);
 }
 
 function numberFrom(

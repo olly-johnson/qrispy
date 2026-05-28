@@ -110,7 +110,7 @@ function PositionsTable({
         </thead>
         <tbody className="divide-y divide-white/10">
           {positions.map((position) => (
-            <tr key={position.symbol}>
+            <tr key={position.id}>
               <td className="px-4 py-3 font-mono text-cyan-200">{position.symbol}</td>
               <td className="px-4 py-3 text-right font-mono">{position.quantity}</td>
               <td className="px-4 py-3 text-right font-mono">
