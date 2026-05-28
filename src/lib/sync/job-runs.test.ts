@@ -25,6 +25,8 @@ describe("recordTradeZeroSyncQueued", () => {
     expect(from).toHaveBeenCalledWith("job_runs");
     expect(upsert).toHaveBeenCalledWith(
       {
+        completed_at: null,
+        error: null,
         user_id: "user-123",
         job_type: "tradezero_sync",
         status: "queued",
@@ -40,5 +42,31 @@ describe("recordTradeZeroSyncQueued", () => {
     );
     expect(select).toHaveBeenCalledWith("id");
     expect(single).toHaveBeenCalledOnce();
+  });
+
+  it("clears stale errors when a queued job is recorded again", async () => {
+    const event = buildTradeZeroSyncEvent({
+      userId: "user-123",
+      requestedBy: "manual",
+      now: new Date("2026-05-28T09:30:00.000Z"),
+    });
+    const single = vi.fn().mockResolvedValue({
+      data: { id: "job-123" },
+      error: null,
+    });
+    const select = vi.fn(() => ({ single }));
+    const upsert = vi.fn(() => ({ select }));
+    const from = vi.fn(() => ({ upsert }));
+
+    await recordTradeZeroSyncQueued(event.data, { client: { from } });
+
+    expect(upsert).toHaveBeenCalledWith(
+      expect.objectContaining({
+        completed_at: null,
+        error: null,
+        status: "queued",
+      }),
+      { onConflict: "user_id,job_type,idempotency_key" },
+    );
   });
 });

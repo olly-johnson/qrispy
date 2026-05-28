@@ -1,4 +1,8 @@
 import { normalizeTradeZeroFill } from "@/lib/tradezero/normalize";
+import {
+  getTradeZeroAccountDisplayName,
+  getTradeZeroAccountId,
+} from "@/lib/tradezero/account";
 import { TradeZeroClient } from "@/lib/tradezero/client";
 import { reconstructTrades } from "@/lib/trades/reconstruct";
 import type { CanonicalFill } from "@/lib/trades/types";
@@ -36,7 +40,7 @@ export async function runTradeZeroSync(input: SyncInput) {
     const normalizedFills: CanonicalFill[] = [];
 
     for (const accountPayload of accounts) {
-      const brokerAccountId = stringFrom(accountPayload, ["accountId", "id", "accountNumber"]);
+      const brokerAccountId = getTradeZeroAccountId(accountPayload);
       const { data: account, error: accountError } = await supabase
         .from("accounts")
         .upsert(
@@ -44,7 +48,7 @@ export async function runTradeZeroSync(input: SyncInput) {
             user_id: input.userId,
             broker: "tradezero",
             broker_account_id: brokerAccountId,
-            display_name: stringFrom(accountPayload, ["displayName", "name"], brokerAccountId),
+            display_name: getTradeZeroAccountDisplayName(accountPayload, brokerAccountId),
             currency: "USD",
           },
           { onConflict: "user_id,broker,broker_account_id" },

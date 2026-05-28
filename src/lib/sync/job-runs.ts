@@ -75,6 +75,8 @@ async function upsertTradeZeroSyncJob(
   const supabase = resolveJobRunClient(options.client);
   const normalized = normalizeJobInput(input);
   const values: Record<string, unknown> = {
+    completed_at: null,
+    error: null,
     user_id: normalized.userId,
     job_type: "tradezero_sync",
     status,
