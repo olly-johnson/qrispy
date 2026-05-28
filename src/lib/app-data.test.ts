@@ -1,6 +1,6 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 
-import { mapLatestPositions } from "@/lib/app-data";
+import { getTradeHistory, mapLatestPositions } from "@/lib/app-data";
 
 describe("mapLatestPositions", () => {
   it("keeps only one row per account and symbol from the latest snapshot", () => {
@@ -55,5 +55,56 @@ describe("mapLatestPositions", () => {
         unrealizedPnl: 134.26,
       },
     ]);
+  });
+});
+
+describe("getTradeHistory", () => {
+  it("loads all trades from Jan 1 through today's date without the dashboard limit", async () => {
+    const order = vi.fn().mockResolvedValue({
+      data: [
+        {
+          id: "trade-1",
+          symbol: "ZSL",
+          direction: "LONG",
+          status: "CLOSED",
+          opened_at: "2026-01-02T15:00:00.000Z",
+          closed_at: "2026-01-02T16:00:00.000Z",
+          realized_pnl: 12.5,
+          total_fees: 1.25,
+        },
+      ],
+      error: null,
+    });
+    const lt = vi.fn(() => ({ order }));
+    const gte = vi.fn(() => ({ lt }));
+    const eq = vi.fn(() => ({ gte }));
+    const select = vi.fn(() => ({ eq }));
+    const from = vi.fn(() => ({ select }));
+
+    await expect(
+      getTradeHistory("user-1", {
+        client: { from },
+        now: new Date("2026-05-28T12:00:00.000Z"),
+      }),
+    ).resolves.toEqual([
+      {
+        id: "trade-1",
+        symbol: "ZSL",
+        direction: "LONG",
+        status: "CLOSED",
+        openedAt: "2026-01-02T15:00:00.000Z",
+        closedAt: "2026-01-02T16:00:00.000Z",
+        realizedPnl: 12.5,
+        totalFees: 1.25,
+      },
+    ]);
+
+    expect(from).toHaveBeenCalledWith("trades");
+    expect(select).toHaveBeenCalledWith("*");
+    expect(eq).toHaveBeenCalledWith("user_id", "user-1");
+    expect(gte).toHaveBeenCalledWith("opened_at", "2026-01-01T00:00:00.000Z");
+    expect(lt).toHaveBeenCalledWith("opened_at", "2026-05-29T00:00:00.000Z");
+    expect(order).toHaveBeenCalledWith("opened_at", { ascending: false });
+    expect(JSON.stringify({ from: from.mock.calls })).not.toContain("limit");
   });
 });

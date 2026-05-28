@@ -30,6 +30,28 @@ export type JobRun = {
   error: string | null;
 };
 
+type TradeHistoryClient = {
+  from(table: "trades"): {
+    select(columns: "*"): {
+      eq(column: "user_id", value: string): {
+        gte(column: "opened_at", value: string): {
+          lt(column: "opened_at", value: string): {
+            order(
+              column: "opened_at",
+              options: { ascending: boolean },
+            ): Promise<{
+              data: Record<string, unknown>[] | null;
+              error: unknown;
+            }>;
+          };
+        };
+      };
+    };
+  };
+};
+
+const TRADE_HISTORY_START_DATE = "2026-01-01T00:00:00.000Z";
+
 export async function getDashboardData(userId: string) {
   const supabase = await createSupabaseServerClient();
 
@@ -98,6 +120,33 @@ export async function getDashboardData(userId: string) {
       snapshotResult.data != null ||
       (jobsResult.data?.length ?? 0) > 0,
   };
+}
+
+export async function getTradeHistory(
+  userId: string,
+  options: { client?: unknown; now?: Date } = {},
+) {
+  const supabase =
+    (options.client as TradeHistoryClient | undefined) ??
+    ((await createSupabaseServerClient()) as TradeHistoryClient | null);
+
+  if (!supabase) {
+    return [] as DashboardTrade[];
+  }
+
+  const { data, error } = await supabase
+    .from("trades")
+    .select("*")
+    .eq("user_id", userId)
+    .gte("opened_at", TRADE_HISTORY_START_DATE)
+    .lt("opened_at", tomorrowUtc(options.now ?? new Date()))
+    .order("opened_at", { ascending: false });
+
+  if (error) {
+    throw error;
+  }
+
+  return (data ?? []).map(mapTrade);
 }
 
 export async function getTradeDetail(userId: string, tradeId: string) {
@@ -189,6 +238,12 @@ function mapJob(row: Record<string, unknown>): JobRun {
     completedAt: row.completed_at ? String(row.completed_at) : null,
     error: row.error ? String(row.error) : null,
   };
+}
+
+function tomorrowUtc(now: Date) {
+  return new Date(
+    Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate() + 1),
+  ).toISOString();
 }
 
 function numberOrZero(value: unknown) {

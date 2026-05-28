@@ -3,13 +3,13 @@ import Link from "next/link";
 import { AppShell } from "@/components/app-shell";
 import { formatDateTime, formatMoney } from "@/components/format";
 import { requireUser } from "@/lib/auth/session";
-import { getDashboardData } from "@/lib/app-data";
+import { getTradeHistory } from "@/lib/app-data";
 
 export const dynamic = "force-dynamic";
 
 export default async function TradesPage() {
   const user = await requireUser();
-  const data = await getDashboardData(user.id);
+  const trades = await getTradeHistory(user.id);
 
   return (
     <AppShell user={user}>
@@ -27,7 +27,7 @@ export default async function TradesPage() {
             </tr>
           </thead>
           <tbody className="divide-y divide-white/10">
-            {data.trades.map((trade) => (
+            {trades.map((trade) => (
               <tr key={trade.id}>
                 <td className="px-4 py-3">
                   <Link href={`/trades/${trade.id}`} className="font-mono text-cyan-200">
@@ -45,7 +45,7 @@ export default async function TradesPage() {
                 </td>
               </tr>
             ))}
-            {data.trades.length === 0 ? (
+            {trades.length === 0 ? (
               <tr>
                 <td className="px-4 py-8 text-zinc-500" colSpan={6}>
                   Sync TradeZero to reconstruct trades.
