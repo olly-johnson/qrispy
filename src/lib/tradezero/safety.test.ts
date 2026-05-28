@@ -14,7 +14,7 @@ describe("TradeZero safety guard", () => {
     expect(() =>
       assertTradeZeroReadOnlyRequest({
         method: "GET",
-        path: "/v1/api/accounts/TZ123/orders-with-pagination/start-date/2026-01-01",
+        path: "/v1/api/accounts/TZ123/orders-with-pagination/start-date/2026-01-01?limit=100&offset=100",
       }),
     ).not.toThrow();
 

@@ -6,7 +6,7 @@ const READ_ONLY_PATH_ALLOWLIST = [
   /^\/v1\/api\/accounts\/[^/]+\/pnl$/,
   /^\/v1\/api\/accounts\/[^/]+\/orders$/,
   /^\/v1\/api\/accounts\/[^/]+\/orders\/start-date\/\d{4}-\d{2}-\d{2}$/,
-  /^\/v1\/api\/accounts\/[^/]+\/orders-with-pagination\/start-date\/\d{4}-\d{2}-\d{2}$/,
+  /^\/v1\/api\/accounts\/[^/]+\/orders-with-pagination\/start-date\/\d{4}-\d{2}-\d{2}(?:\?limit=\d+&offset=\d+)?$/,
   /^\/v1\/api\/accounts\/[^/]+\/positions$/,
 ];
 

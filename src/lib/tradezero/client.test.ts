@@ -74,6 +74,74 @@ describe("TradeZeroClient", () => {
       },
     ]);
   });
+
+  it("walks overlapping history windows, paginates offsets, and dedupes fills", async () => {
+    vi.stubEnv("TRADEZERO_READ_ONLY_CONFIRMED", "true");
+    vi.stubEnv("TRADEZERO_BROKER_2FA_CONFIRMED", "true");
+    const fetcher = vi
+      .fn()
+      .mockResolvedValueOnce(
+        jsonResponse({
+          pagination: {
+            currentLimit: 2,
+            currentOffset: 0,
+            totalRecords: 3,
+          },
+          tradingHistory: [
+            { tradeId: 1, symbol: "AAPL", tradeDate: "2026-01-02T00:00:00" },
+            { tradeId: 2, symbol: "MSFT", tradeDate: "2026-01-30T00:00:00" },
+          ],
+        }),
+      )
+      .mockResolvedValueOnce(
+        jsonResponse({
+          pagination: {
+            currentLimit: 2,
+            currentOffset: 2,
+            totalRecords: 3,
+          },
+          tradingHistory: [
+            { tradeId: 3, symbol: "NVDA", tradeDate: "2026-01-09T00:00:00" },
+          ],
+        }),
+      )
+      .mockResolvedValueOnce(
+        jsonResponse({
+          pagination: {
+            currentLimit: 2,
+            currentOffset: 0,
+            totalRecords: 2,
+          },
+          tradingHistory: [
+            { tradeId: 1, symbol: "AAPL", tradeDate: "2026-01-02T00:00:00" },
+            { tradeId: 4, symbol: "TSLA", tradeDate: "2026-01-10T00:00:00" },
+          ],
+        }),
+      );
+
+    const orders = await new TradeZeroClient(config, fetcher).listHistoricalOrders({
+      accountId: "TZP12345678",
+      startDate: "2026-01-01",
+      endDate: "2026-01-10",
+    });
+
+    expect(orders.map((order) => order.tradeId)).toEqual([1, 3, 4]);
+    expect(fetcher).toHaveBeenNthCalledWith(
+      1,
+      "https://webapi.tradezero.com/v1/api/accounts/TZP12345678/orders-with-pagination/start-date/2026-01-01?limit=100&offset=0",
+      expect.any(Object),
+    );
+    expect(fetcher).toHaveBeenNthCalledWith(
+      2,
+      "https://webapi.tradezero.com/v1/api/accounts/TZP12345678/orders-with-pagination/start-date/2026-01-01?limit=100&offset=2",
+      expect.any(Object),
+    );
+    expect(fetcher).toHaveBeenNthCalledWith(
+      3,
+      "https://webapi.tradezero.com/v1/api/accounts/TZP12345678/orders-with-pagination/start-date/2026-01-08?limit=100&offset=0",
+      expect.any(Object),
+    );
+  });
 });
 
 function jsonResponse(body: unknown) {
