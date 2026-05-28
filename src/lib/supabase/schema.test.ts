@@ -38,3 +38,32 @@ describe("Milestone 1 Supabase migration", () => {
     expect(sql).toContain("grant select, insert, update, delete");
   });
 });
+
+describe("Supabase foreign key index migration", () => {
+  it("adds indexes for relationship columns used by deletes and joins", () => {
+    const sql = readFileSync(
+      join(
+        process.cwd(),
+        "supabase",
+        "migrations",
+        "20260528135000_add_foreign_key_indexes.sql",
+      ),
+      "utf8",
+    );
+
+    for (const indexName of [
+      "account_equity_snapshots_user_id_idx",
+      "account_portfolio_snapshots_user_id_idx",
+      "fills_account_id_idx",
+      "fills_import_batch_id_idx",
+      "job_steps_job_run_id_idx",
+      "job_steps_user_id_idx",
+      "sync_cursors_account_id_idx",
+      "trade_fills_fill_id_idx",
+      "trade_fills_user_id_idx",
+      "trades_account_id_idx",
+    ]) {
+      expect(sql).toContain(indexName);
+    }
+  });
+});
