@@ -4,6 +4,7 @@ import { MetricCard, ProvenanceIcon } from "@/components/metric-card";
 import { SyncButton } from "@/components/sync-button";
 import { requireUser } from "@/lib/auth/session";
 import { getDashboardData } from "@/lib/app-data";
+import { describeLatestSyncJob } from "@/lib/sync/job-status";
 
 export const dynamic = "force-dynamic";
 
@@ -11,6 +12,7 @@ export default async function DashboardPage() {
   const user = await requireUser();
   const data = await getDashboardData(user.id);
   const { metrics } = data.summary;
+  const latestJob = data.jobs[0];
 
   return (
     <AppShell user={user}>
@@ -20,6 +22,11 @@ export default async function DashboardPage() {
           <p className="mt-1 text-sm text-zinc-500">
             Latest broker snapshot: {formatDateTime(data.latestSnapshotAt)}
           </p>
+          {latestJob ? (
+            <p className="mt-1 text-sm text-emerald-200">
+              {describeLatestSyncJob(latestJob)}
+            </p>
+          ) : null}
         </div>
         <SyncButton />
       </div>
