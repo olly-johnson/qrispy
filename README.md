@@ -16,6 +16,19 @@ Copy `.env.example` to `.env.local` and fill the Supabase, owner, Inngest, and T
 
 Apply `supabase/migrations/20260528101000_milestone_1_core.sql` to the Supabase project before using the app.
 
+## TradeZero Safety
+
+Qrispy is a read-only TradeZero integration. The code allowlists only `GET` endpoints used for accounts, P&L, positions, and historical orders/fills. Any non-GET TradeZero request or non-allowlisted endpoint throws before `fetch` runs.
+
+Before enabling live sync, use a read-only TradeZero API key if the broker portal offers key scopes, and enable broker account 2FA. Then set:
+
+```text
+TRADEZERO_READ_ONLY_CONFIRMED=true
+TRADEZERO_BROKER_2FA_CONFIRMED=true
+```
+
+If either confirmation is missing, Qrispy blocks TradeZero sync.
+
 ## Development
 
 ```bash
