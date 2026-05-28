@@ -1,8 +1,21 @@
 import { normalizeTradeZeroFill } from "@/lib/tradezero/normalize";
+import {
+  getTradeZeroAccountDisplayName,
+  getTradeZeroAccountId,
+} from "@/lib/tradezero/account";
 import { TradeZeroClient } from "@/lib/tradezero/client";
+import {
+  buildTradeZeroPortfolioSnapshot,
+  buildTradeZeroPositionSnapshot,
+} from "@/lib/tradezero/snapshot";
 import { reconstructTrades } from "@/lib/trades/reconstruct";
 import type { CanonicalFill } from "@/lib/trades/types";
 import { createSupabaseAdminClient } from "@/lib/supabase/server";
+import {
+  recordTradeZeroSyncFailed,
+  recordTradeZeroSyncRunning,
+  recordTradeZeroSyncSucceeded,
+} from "@/lib/sync/job-runs";
 
 type SyncInput = {
   userId: string;
@@ -13,132 +26,154 @@ type SyncInput = {
 
 export async function runTradeZeroSync(input: SyncInput) {
   const supabase = createSupabaseAdminClient();
-  const tradeZero = new TradeZeroClient();
 
   if (!supabase) {
     throw new Error("SUPABASE_SERVICE_ROLE_KEY is required for TradeZero sync");
   }
 
-  if (!tradeZero.isConfigured()) {
-    throw new Error("TradeZero credentials are required for sync");
-  }
+  const jobRun = await recordTradeZeroSyncRunning(input, { client: supabase });
 
-  const jobRun = await upsertJobRun(input, "running");
-  const accounts = await tradeZero.listAccounts();
-  const normalizedFills: CanonicalFill[] = [];
+  try {
+    const tradeZero = new TradeZeroClient();
 
-  for (const accountPayload of accounts) {
-    const brokerAccountId = stringFrom(accountPayload, ["accountId", "id", "accountNumber"]);
-    const { data: account, error: accountError } = await supabase
-      .from("accounts")
-      .upsert(
-        {
-          user_id: input.userId,
-          broker: "tradezero",
-          broker_account_id: brokerAccountId,
-          display_name: stringFrom(accountPayload, ["displayName", "name"], brokerAccountId),
-          currency: "USD",
-        },
-        { onConflict: "user_id,broker,broker_account_id" },
-      )
-      .select("id")
-      .single();
-
-    if (accountError) {
-      throw accountError;
+    if (!tradeZero.isConfigured()) {
+      throw new Error("TradeZero credentials are required for sync");
     }
 
-    const accountId = account.id as string;
-    const snapshotAt = new Date().toISOString();
-    const pnl = await tradeZero.getAccountPnl(brokerAccountId);
-    await supabase.from("account_portfolio_snapshots").upsert(
-      {
-        user_id: input.userId,
-        account_id: accountId,
-        snapshot_at: snapshotAt,
-        snapshot_date: snapshotAt.slice(0, 10),
-        equity: numberFrom(pnl, ["equity", "accountValue"]),
-        cash: numberFrom(pnl, ["cash", "cashBalance"]),
-        buying_power: numberFrom(pnl, ["buyingPower", "buying_power"]),
-        realized_pnl: numberFrom(pnl, ["realizedPnl", "realized_pnl"]),
-        source: "tradezero",
-        raw_payload: pnl,
-      },
-      { onConflict: "account_id,snapshot_at,source" },
-    );
+    const accounts = await tradeZero.listAccounts();
+    const normalizedFills: CanonicalFill[] = [];
 
-    const positions = await tradeZero.listPositions(brokerAccountId);
-    if (positions.length > 0) {
-      await supabase.from("broker_position_snapshots").upsert(
-        positions.map((position) => ({
+    for (const accountPayload of accounts) {
+      const brokerAccountId = getTradeZeroAccountId(accountPayload);
+      const { data: account, error: accountError } = await supabase
+        .from("accounts")
+        .upsert(
+          {
+            user_id: input.userId,
+            broker: "tradezero",
+            broker_account_id: brokerAccountId,
+            display_name: getTradeZeroAccountDisplayName(accountPayload, brokerAccountId),
+            currency: "USD",
+          },
+          { onConflict: "user_id,broker,broker_account_id" },
+        )
+        .select("id")
+        .single();
+
+      if (accountError) {
+        throw accountError;
+      }
+
+      const accountId = account.id as string;
+      const snapshotAt = new Date().toISOString();
+      const pnl = await tradeZero.getAccountPnl(brokerAccountId);
+      const positions = await tradeZero.listPositions(brokerAccountId);
+      const positionSnapshots = positions.map((position) =>
+        buildTradeZeroPositionSnapshot({ pnl, position }),
+      );
+      const portfolioSnapshot = buildTradeZeroPortfolioSnapshot({
+        pnl,
+        positionSnapshots,
+      });
+
+      await supabase.from("account_portfolio_snapshots").upsert(
+        {
           user_id: input.userId,
           account_id: accountId,
           snapshot_at: snapshotAt,
-          symbol: stringFrom(position, ["symbol"]).toUpperCase(),
-          quantity: numberFrom(position, ["quantity", "qty"], 0),
-          average_price: numberFrom(position, ["averagePrice", "avgPrice"]),
-          last_price: numberFrom(position, ["lastPrice", "price"]),
-          market_value: numberFrom(position, ["marketValue", "market_value"]),
-          unrealized_pnl: numberFrom(position, ["unrealizedPnl", "unrealized_pnl"]),
-          currency: "USD",
-          raw_payload: position,
-        })),
-        { onConflict: "account_id,snapshot_at,symbol,asset_class" },
+          snapshot_date: snapshotAt.slice(0, 10),
+          equity: portfolioSnapshot.equity,
+          cash: portfolioSnapshot.cash,
+          buying_power: numberFrom(pnl, ["buyingPower", "buying_power"]),
+          long_market_value: portfolioSnapshot.longMarketValue,
+          short_market_value: portfolioSnapshot.shortMarketValue,
+          gross_exposure: portfolioSnapshot.grossExposure,
+          net_exposure: portfolioSnapshot.netExposure,
+          percent_invested: portfolioSnapshot.percentInvested,
+          day_pnl: portfolioSnapshot.dayPnl,
+          unrealized_pnl: portfolioSnapshot.unrealizedPnl,
+          realized_pnl: portfolioSnapshot.realizedPnl,
+          source: "tradezero",
+          raw_payload: pnl,
+        },
+        { onConflict: "account_id,snapshot_at,source" },
       );
+
+      if (positionSnapshots.length > 0) {
+        await supabase.from("broker_position_snapshots").upsert(
+          positionSnapshots.map((positionSnapshot, index) => ({
+            user_id: input.userId,
+            account_id: accountId,
+            snapshot_at: snapshotAt,
+            symbol: positionSnapshot.symbol,
+            quantity: positionSnapshot.quantity,
+            average_price: positionSnapshot.averagePrice,
+            last_price: positionSnapshot.lastPrice,
+            market_value: positionSnapshot.marketValue,
+            unrealized_pnl: positionSnapshot.unrealizedPnl,
+            currency: "USD",
+            raw_payload: positions[index],
+          })),
+          { onConflict: "account_id,snapshot_at,symbol,asset_class" },
+        );
+      }
+
+      const orders = await tradeZero.listHistoricalOrders({
+        accountId: brokerAccountId,
+        startDate: input.fromDate,
+      });
+
+      const accountFills = orders
+        .filter((order) => hasFillQuantity(order))
+        .map((payload) =>
+          normalizeTradeZeroFill({
+            userId: input.userId,
+            accountId,
+            brokerAccountId,
+            payload,
+          }),
+        );
+
+      normalizedFills.push(...accountFills);
+
+      if (accountFills.length > 0) {
+        await supabase.from("fills").upsert(
+          accountFills.map((fill) => ({
+            user_id: fill.userId,
+            account_id: fill.accountId,
+            broker: fill.broker,
+            source_type: fill.sourceType,
+            source_fill_id: fill.sourceFillId,
+            idempotency_key: fill.idempotencyKey,
+            symbol: fill.symbol,
+            asset_class: fill.assetClass,
+            side: fill.side,
+            quantity: fill.quantity,
+            price: fill.price,
+            executed_at: fill.executedAt,
+            executed_tz: fill.executedTz,
+            trade_date: fill.tradeDate,
+            currency: fill.currency,
+            net_proceeds: fill.netProceeds,
+            commission: fill.commission,
+            raw_payload: fill.rawPayload,
+          })),
+          { onConflict: "user_id,idempotency_key" },
+        );
+      }
     }
 
-    const orders = await tradeZero.listHistoricalOrders({
-      accountId: brokerAccountId,
-      startDate: input.fromDate,
-    });
+    await persistReconstructedTrades(normalizedFills);
+    await recordTradeZeroSyncSucceeded(input, { client: supabase, id: jobRun?.id });
 
-    const accountFills = orders
-      .filter((order) => hasFillQuantity(order))
-      .map((payload) =>
-        normalizeTradeZeroFill({
-          userId: input.userId,
-          accountId,
-          brokerAccountId,
-          payload,
-        }),
-      );
-
-    normalizedFills.push(...accountFills);
-
-    if (accountFills.length > 0) {
-      await supabase.from("fills").upsert(
-        accountFills.map((fill) => ({
-          user_id: fill.userId,
-          account_id: fill.accountId,
-          broker: fill.broker,
-          source_type: fill.sourceType,
-          source_fill_id: fill.sourceFillId,
-          idempotency_key: fill.idempotencyKey,
-          symbol: fill.symbol,
-          asset_class: fill.assetClass,
-          side: fill.side,
-          quantity: fill.quantity,
-          price: fill.price,
-          executed_at: fill.executedAt,
-          executed_tz: fill.executedTz,
-          trade_date: fill.tradeDate,
-          currency: fill.currency,
-          net_proceeds: fill.netProceeds,
-          commission: fill.commission,
-          raw_payload: fill.rawPayload,
-        })),
-        { onConflict: "user_id,idempotency_key" },
-      );
-    }
+    return {
+      accountCount: accounts.length,
+      fillCount: normalizedFills.length,
+    };
+  } catch (error) {
+    await recordTradeZeroSyncFailed(input, error, { client: supabase, id: jobRun?.id });
+    throw error;
   }
-
-  await persistReconstructedTrades(normalizedFills);
-  await upsertJobRun(input, "succeeded", jobRun.id as string);
-
-  return {
-    accountCount: accounts.length,
-    fillCount: normalizedFills.length,
-  };
 }
 
 async function persistReconstructedTrades(fills: CanonicalFill[]) {
@@ -173,65 +208,8 @@ async function persistReconstructedTrades(fills: CanonicalFill[]) {
   }
 }
 
-async function upsertJobRun(input: SyncInput, status: string, id?: string) {
-  const supabase = createSupabaseAdminClient();
-
-  if (!supabase) {
-    throw new Error("SUPABASE_SERVICE_ROLE_KEY is required for job writes");
-  }
-
-  const { data, error } = await supabase
-    .from("job_runs")
-    .upsert(
-      {
-        id,
-        user_id: input.userId,
-        job_type: "tradezero_sync",
-        status,
-        idempotency_key: input.idempotencyKey,
-        started_at: status === "running" ? new Date().toISOString() : undefined,
-        completed_at: status === "succeeded" ? new Date().toISOString() : undefined,
-        metadata: {
-          from_date: input.fromDate,
-          to_date: input.toDate,
-        },
-      },
-      { onConflict: "user_id,job_type,idempotency_key" },
-    )
-    .select("id")
-    .single();
-
-  if (error) {
-    throw error;
-  }
-
-  return data;
-}
-
 function hasFillQuantity(payload: Record<string, unknown>) {
   return numberFrom(payload, ["qty", "quantity"]) != null;
-}
-
-function stringFrom(
-  payload: Record<string, unknown>,
-  keys: string[],
-  fallback?: string,
-) {
-  for (const key of keys) {
-    const value = payload[key];
-    if (typeof value === "string" && value.trim()) {
-      return value.trim();
-    }
-    if (typeof value === "number") {
-      return String(value);
-    }
-  }
-
-  if (fallback != null) {
-    return fallback;
-  }
-
-  throw new Error(`Missing field: ${keys.join(" or ")}`);
 }
 
 function numberFrom(

@@ -2,6 +2,7 @@ import { buildPortfolioSummary } from "@/lib/portfolio/metrics";
 import { createSupabaseServerClient } from "@/lib/supabase/server";
 
 export type DashboardPosition = {
+  id: string;
   symbol: string;
   quantity: number;
   averagePrice: number | null;
@@ -50,7 +51,7 @@ export async function getDashboardData(userId: string) {
         .select("*")
         .eq("user_id", userId)
         .order("snapshot_at", { ascending: false })
-        .limit(20),
+        .limit(200),
       supabase
         .from("trades")
         .select("*")
@@ -65,7 +66,7 @@ export async function getDashboardData(userId: string) {
         .limit(8),
     ]);
 
-  const positions = (positionsResult.data ?? []).map(mapPosition);
+  const positions = mapLatestPositions(positionsResult.data ?? []);
   const trades = (tradesResult.data ?? []).map(mapTrade);
   const summary = buildPortfolioSummary({
     snapshot: snapshotResult.data
@@ -133,8 +134,31 @@ function emptyDashboardData() {
   };
 }
 
+export function mapLatestPositions(rows: Record<string, unknown>[]) {
+  const latestSnapshotAt = rows[0]?.snapshot_at;
+  const seen = new Set<string>();
+  const positions: DashboardPosition[] = [];
+
+  for (const row of rows) {
+    if (row.snapshot_at !== latestSnapshotAt) {
+      continue;
+    }
+
+    const key = `${String(row.account_id)}:${String(row.symbol)}`;
+    if (seen.has(key)) {
+      continue;
+    }
+
+    seen.add(key);
+    positions.push(mapPosition(row));
+  }
+
+  return positions;
+}
+
 function mapPosition(row: Record<string, unknown>): DashboardPosition {
   return {
+    id: String(row.id ?? `${String(row.account_id)}:${String(row.symbol)}`),
     symbol: String(row.symbol),
     quantity: numberOrZero(row.quantity),
     averagePrice: numberOrNull(row.average_price),
