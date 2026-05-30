@@ -17,7 +17,7 @@ describe("buildTradeZeroSyncEvent", () => {
         user_id: "user-1",
         requested_by: "manual",
         sync_scope: "backfill",
-        from_date: "2026-01-01",
+        from_date: "2025-12-01",
         to_date: "2026-05-28",
         idempotency_key: "tradezero-sync:user-1:manual:2026-05-28",
       },

@@ -11,7 +11,7 @@ export type TradeZeroSyncRequestedEvent = {
   };
 };
 
-const BACKFILL_START_DATE = "2026-01-01";
+const BACKFILL_START_DATE = "2025-12-01";
 
 export function buildTradeZeroSyncEvent(input: {
   userId: string;

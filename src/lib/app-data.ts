@@ -34,16 +34,14 @@ type TradeHistoryClient = {
   from(table: "trades"): {
     select(columns: "*"): {
       eq(column: "user_id", value: string): {
-        gte(column: "opened_at", value: string): {
-          lt(column: "opened_at", value: string): {
-            order(
-              column: "opened_at",
-              options: { ascending: boolean },
-            ): Promise<{
-              data: Record<string, unknown>[] | null;
-              error: unknown;
-            }>;
-          };
+        lt(column: "opened_at", value: string): {
+          order(
+            column: "opened_at",
+            options: { ascending: boolean },
+          ): Promise<{
+            data: Record<string, unknown>[] | null;
+            error: unknown;
+          }>;
         };
       };
     };
@@ -138,7 +136,6 @@ export async function getTradeHistory(
     .from("trades")
     .select("*")
     .eq("user_id", userId)
-    .gte("opened_at", TRADE_HISTORY_START_DATE)
     .lt("opened_at", tomorrowUtc(options.now ?? new Date()))
     .order("opened_at", { ascending: false });
 
@@ -146,7 +143,7 @@ export async function getTradeHistory(
     throw error;
   }
 
-  return (data ?? []).map(mapTrade);
+  return (data ?? []).filter(overlapsTradeHistoryWindow).map(mapTrade);
 }
 
 export async function getTradeDetail(userId: string, tradeId: string) {
@@ -244,6 +241,12 @@ function tomorrowUtc(now: Date) {
   return new Date(
     Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate() + 1),
   ).toISOString();
+}
+
+function overlapsTradeHistoryWindow(row: Record<string, unknown>) {
+  const closedAt = row.closed_at ? String(row.closed_at) : null;
+
+  return closedAt == null || closedAt >= TRADE_HISTORY_START_DATE;
 }
 
 function numberOrZero(value: unknown) {
