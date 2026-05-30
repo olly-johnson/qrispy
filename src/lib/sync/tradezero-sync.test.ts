@@ -36,10 +36,18 @@ describe("replaceReconstructedTrades", () => {
     const deleteIn = vi.fn(() => ({ gte: deleteGte }));
     const deleteEq = vi.fn(() => ({ in: deleteIn }));
     const deleteTrades = vi.fn(() => ({ eq: deleteEq }));
-    const upsert = vi.fn().mockResolvedValue({ error: null });
+    const selectUpsertedTrades = vi.fn().mockResolvedValue({
+      data: [{ id: "trade-crml", reconstruction_key: "account-1:CRML:fill-1" }],
+      error: null,
+    });
+    const upsert = vi.fn(() => ({ select: selectUpsertedTrades }));
+    const insertTradeFills = vi.fn().mockResolvedValue({ error: null });
     const from = vi.fn((table: string) => {
       if (table === "fills") {
         return { select: fillsSelect };
+      }
+      if (table === "trade_fills") {
+        return { insert: insertTradeFills };
       }
 
       return {
@@ -69,6 +77,99 @@ describe("replaceReconstructedTrades", () => {
         realized_pnl: 37.16,
       }),
     ]);
+    expect(insertTradeFills).toHaveBeenCalledWith([
+      expect.objectContaining({
+        trade_id: "trade-crml",
+        fill_id: "fill-1",
+        allocation_role: "ENTRY",
+      }),
+      expect.objectContaining({
+        trade_id: "trade-crml",
+        fill_id: "fill-2",
+        allocation_role: "EXIT",
+      }),
+    ]);
+  });
+
+  it("does not recreate ignored open December trades during reconstruction", async () => {
+    const fillsOrder = vi.fn().mockResolvedValue({
+      data: [
+        storedFill({
+          id: "agq-dec-open",
+          side: "SELL",
+          quantity: 13,
+          price: 153.9992,
+          executedAt: "2025-12-10T14:56:21.000Z",
+          fees: 3,
+          symbol: "AGQ",
+        }),
+        storedFill({
+          id: "jan-closed-entry",
+          side: "BUY",
+          quantity: 10,
+          price: 20,
+          executedAt: "2026-01-08T15:18:00.000Z",
+          fees: 1,
+          symbol: "ZSL",
+        }),
+        storedFill({
+          id: "jan-closed-exit",
+          side: "SELL",
+          quantity: 10,
+          price: 21,
+          executedAt: "2026-01-08T19:05:00.000Z",
+          fees: 1,
+          symbol: "ZSL",
+        }),
+      ],
+      error: null,
+    });
+    const fillsLte = vi.fn(() => ({ order: fillsOrder }));
+    const fillsGte = vi.fn(() => ({ lte: fillsLte }));
+    const fillsIn = vi.fn(() => ({ gte: fillsGte }));
+    const fillsEq = vi.fn(() => ({ in: fillsIn }));
+    const fillsSelect = vi.fn(() => ({ eq: fillsEq }));
+
+    const deleteLt = vi.fn().mockResolvedValue({ error: null });
+    const deleteGte = vi.fn(() => ({ lt: deleteLt }));
+    const deleteIn = vi.fn(() => ({ gte: deleteGte }));
+    const deleteEq = vi.fn(() => ({ in: deleteIn }));
+    const deleteTrades = vi.fn(() => ({ eq: deleteEq }));
+    const selectUpsertedTrades = vi.fn().mockResolvedValue({
+      data: [{ id: "trade-zsl", reconstruction_key: "account-1:ZSL:jan-closed-entry" }],
+      error: null,
+    });
+    const upsert = vi.fn(() => ({ select: selectUpsertedTrades }));
+    const insertTradeFills = vi.fn().mockResolvedValue({ error: null });
+    const from = vi.fn((table: string) => {
+      if (table === "fills") {
+        return { select: fillsSelect };
+      }
+      if (table === "trade_fills") {
+        return { insert: insertTradeFills };
+      }
+
+      return {
+        delete: deleteTrades,
+        upsert,
+      };
+    });
+
+    await replaceReconstructedTrades({
+      client: { from },
+      userId: "user-1",
+      accountIds: ["account-1"],
+      fromDate: "2025-12-01",
+      toDate: "2026-05-28",
+    });
+
+    expect(upsert).toHaveBeenCalledOnce();
+    expect(upsert.mock.calls[0][0]).toEqual([
+      expect.objectContaining({
+        symbol: "ZSL",
+        status: "CLOSED",
+      }),
+    ]);
   });
 });
 
@@ -79,6 +180,7 @@ function storedFill(input: {
   price: number;
   executedAt: string;
   fees: number;
+  symbol?: string;
 }) {
   return {
     id: input.id,
@@ -88,7 +190,7 @@ function storedFill(input: {
     source_type: "api",
     source_fill_id: input.id,
     idempotency_key: `tradezero_api|TZ123|${input.id}`,
-    symbol: "CRML",
+    symbol: input.symbol ?? "CRML",
     asset_class: "equity",
     side: input.side,
     quantity: input.quantity,

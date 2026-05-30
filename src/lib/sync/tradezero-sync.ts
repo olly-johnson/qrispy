@@ -65,11 +65,23 @@ type RebuildTradeClient = {
     upsert(
       values: Record<string, unknown>[],
       options: { onConflict: string },
-    ): Promise<{
+    ): {
+      select(columns: "id,reconstruction_key"): Promise<{
+        data: Record<string, unknown>[] | null;
+        error: unknown;
+      }>;
+    };
+  };
+  from(table: "trade_fills"): {
+    insert(values: Record<string, unknown>[]): Promise<{
       error: unknown;
     }>;
   };
 };
+
+const IGNORED_OPEN_DECEMBER_TRADE_SYMBOLS = new Set(["UGL", "AGQ", "ERO", "ROIV"]);
+const IGNORED_DECEMBER_OPEN_START = "2025-12-01T00:00:00.000Z";
+const IGNORED_DECEMBER_OPEN_END = "2026-01-01T00:00:00.000Z";
 
 export async function runTradeZeroSync(input: SyncInput) {
   const supabase = createSupabaseAdminClient();
@@ -294,7 +306,7 @@ export async function replaceReconstructedTrades(input: {
     throw deleteResult.error;
   }
 
-  const trades = reconstructTrades(fills);
+  const trades = reconstructTrades(fills).filter(shouldPersistReconstructedTrade);
   if (trades.length === 0) {
     return;
   }
@@ -319,11 +331,50 @@ export async function replaceReconstructedTrades(input: {
       reconstruction_version: trade.reconstructionVersion,
     })),
     { onConflict: "user_id,reconstruction_key" },
-  );
+  ).select("id,reconstruction_key");
 
   if (upsertResult.error) {
     throw upsertResult.error;
   }
+
+  const tradeIdByReconstructionKey = new Map(
+    (upsertResult.data ?? []).map((trade) => [
+      String(trade.reconstruction_key),
+      String(trade.id),
+    ]),
+  );
+  const tradeFillRows = trades.flatMap((trade) => {
+    const tradeId = tradeIdByReconstructionKey.get(trade.id);
+    if (!tradeId) {
+      throw new Error(`Missing persisted trade id for ${trade.id}`);
+    }
+
+    return trade.allocations.map((allocation) => ({
+      user_id: trade.userId,
+      trade_id: tradeId,
+      fill_id: allocation.fillId,
+      allocated_quantity: allocation.allocatedQuantity,
+      allocation_role: allocation.allocationRole,
+      allocation_price: allocation.allocationPrice,
+    }));
+  });
+
+  if (tradeFillRows.length > 0) {
+    const tradeFillResult = await client.from("trade_fills").insert(tradeFillRows);
+
+    if (tradeFillResult.error) {
+      throw tradeFillResult.error;
+    }
+  }
+}
+
+function shouldPersistReconstructedTrade(trade: ReturnType<typeof reconstructTrades>[number]) {
+  return !(
+    trade.status === "OPEN" &&
+    IGNORED_OPEN_DECEMBER_TRADE_SYMBOLS.has(trade.symbol) &&
+    trade.openedAt >= IGNORED_DECEMBER_OPEN_START &&
+    trade.openedAt < IGNORED_DECEMBER_OPEN_END
+  );
 }
 
 function storedFillToCanonicalFill(row: Record<string, unknown>): CanonicalFill {
