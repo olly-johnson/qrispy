@@ -18,6 +18,10 @@ import type { TradeCharts, TradeChartDataset } from "@/lib/market-data/trade-cha
 
 const UP_COLOR = "#34d399";
 const DOWN_COLOR = "#fb7185";
+export const PRICE_LINE_DISABLED_OPTIONS = {
+  lastValueVisible: false,
+  priceLineVisible: false,
+} as const;
 
 export function TradeChartPanel({ charts }: { charts?: TradeCharts }) {
   const availableCharts = charts?.charts ?? [];
@@ -128,6 +132,7 @@ function LightweightTradeChart({ chart }: { chart: TradeChartDataset }) {
       wickUpColor: UP_COLOR,
       wickDownColor: DOWN_COLOR,
       borderVisible: false,
+      ...PRICE_LINE_DISABLED_OPTIONS,
     });
     candleSeries.setData(prepared.candles);
     createSeriesMarkers(candleSeries, prepared.markers);
@@ -136,6 +141,7 @@ function LightweightTradeChart({ chart }: { chart: TradeChartDataset }) {
       color: "rgba(148, 163, 184, 0.35)",
       priceFormat: { type: "volume" },
       priceScaleId: "",
+      ...PRICE_LINE_DISABLED_OPTIONS,
     });
     volumeSeries.priceScale().applyOptions({
       scaleMargins: { top: 0.82, bottom: 0 },
@@ -146,8 +152,7 @@ function LightweightTradeChart({ chart }: { chart: TradeChartDataset }) {
       const line = api.addSeries(LineSeries, {
         color: overlay.color,
         lineWidth: 2,
-        priceLineVisible: false,
-        lastValueVisible: false,
+        ...PRICE_LINE_DISABLED_OPTIONS,
       }) as ISeriesApi<"Line">;
       line.setData(overlay.points);
     }
@@ -171,7 +176,7 @@ function LightweightTradeChart({ chart }: { chart: TradeChartDataset }) {
   return <div ref={containerRef} className="h-[520px] w-full" />;
 }
 
-function prepareChartData(chart: TradeChartDataset) {
+export function prepareChartData(chart: TradeChartDataset) {
   return {
     candles: chart.bars.map((bar) => ({
       time: chartTime(bar.barStartAt, chart.timeframe),
@@ -194,11 +199,11 @@ function prepareChartData(chart: TradeChartDataset) {
     })),
     markers: chart.markers.map(
       (marker): SeriesMarker<Time> => ({
-      time: chartTime(marker.time, chart.timeframe),
-      position: marker.side === "BUY" ? "belowBar" : "aboveBar",
-      shape: marker.side === "BUY" ? "arrowUp" : "arrowDown",
-      color: marker.side === "BUY" ? "#22d3ee" : "#fb7185",
-      text: marker.text,
+        time: chartTime(marker.time, chart.timeframe),
+        position: marker.role === "ENTRY" ? "belowBar" : "aboveBar",
+        shape: marker.role === "ENTRY" ? "arrowUp" : "arrowDown",
+        color: marker.role === "ENTRY" ? "#22d3ee" : "#fb7185",
+        text: marker.role,
       }),
     ),
   };
