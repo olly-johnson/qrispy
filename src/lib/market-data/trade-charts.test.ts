@@ -56,7 +56,7 @@ describe("getTradeCharts", () => {
     expect(provider.getAggregateBars).toHaveBeenCalledTimes(6);
   });
 
-  it("centers daily charts on the trade with at least 100 bars before entry", async () => {
+  it("shows 200 daily bars before entry and 100 daily bars after exit", async () => {
     const provider: MarketDataProvider = {
       name: "massive",
       getAggregateBars: vi.fn(async (request) =>
@@ -73,8 +73,8 @@ describe("getTradeCharts", () => {
     });
     const daily = result.charts.find((chart) => chart.id === "daily");
 
-    expect(daily?.bars).toHaveLength(201);
-    expect(daily?.bars[100]?.barStartAt).toBe("2026-01-08T00:00:00.000Z");
+    expect(daily?.bars).toHaveLength(301);
+    expect(daily?.bars[200]?.barStartAt).toBe("2026-01-08T00:00:00.000Z");
     expect(daily?.overlays.every((overlay) => overlay.points.length <= daily.bars.length)).toBe(
       true,
     );

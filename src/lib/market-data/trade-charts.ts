@@ -125,7 +125,7 @@ export async function getTradeCharts(input: GetTradeChartsInput): Promise<TradeC
               input.trade.openedAt,
               endAnchor,
               request.timeframe,
-              100,
+              request.timeframe === "1d" ? 200 : 100,
               100,
             )
           : bars;
