@@ -85,8 +85,8 @@ export async function getTradeCharts(input: GetTradeChartsInput): Promise<TradeC
       request: rangeRequest({
         symbol: input.trade.symbol,
         timeframe: "1h",
-        from: entryDate,
-        to: entryDate,
+        from: addDays(entryDate, -10),
+        to: addDays(entryDate, 10),
       }),
     },
     {
@@ -105,8 +105,8 @@ export async function getTradeCharts(input: GetTradeChartsInput): Promise<TradeC
       request: rangeRequest({
         symbol: input.trade.symbol,
         timeframe: "1h",
-        from: exitDate,
-        to: exitDate,
+        from: addDays(exitDate, -10),
+        to: addDays(exitDate, 10),
       }),
     },
   ];

@@ -82,6 +82,33 @@ describe("getTradeCharts", () => {
       daily.bars.some((bar) => bar.barStartAt.slice(0, 10) === point.time),
     )).toBe(true);
   });
+
+  it("loads wider hourly windows around entry and exit fills", async () => {
+    const provider: MarketDataProvider = {
+      name: "massive",
+      getAggregateBars: vi.fn(async (request) =>
+        barsForRequest(request.timeframe, request.symbol),
+      ),
+    };
+    const client = emptyMarketDataClient();
+
+    await getTradeCharts({
+      trade: tradeDetail(),
+      client,
+      provider,
+      now: new Date("2026-05-31T12:00:00.000Z"),
+    });
+
+    const hourlyRequests = vi
+      .mocked(provider.getAggregateBars)
+      .mock.calls.map(([request]) => request)
+      .filter((request) => request.timeframe === "1h");
+
+    expect(hourlyRequests).toEqual([
+      expect.objectContaining({ from: "2025-12-29", to: "2026-01-18" }),
+      expect.objectContaining({ from: "2025-12-29", to: "2026-01-18" }),
+    ]);
+  });
 });
 
 function tradeDetail(): TradeDetail {
