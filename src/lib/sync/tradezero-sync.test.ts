@@ -216,12 +216,16 @@ describe("replaceReconstructedTrades", () => {
     });
     const upsert = vi.fn(() => ({ select: selectUpsertedTrades }));
     const insertTradeFills = vi.fn().mockResolvedValue({ error: null });
+    const stopGroupsTable = emptyStopGroupsTable();
     const from = vi.fn((table: string) => {
       if (table === "fills") {
         return { select: fillsSelect };
       }
       if (table === "trade_fills") {
         return { insert: insertTradeFills };
+      }
+      if (table === "trade_stop_groups") {
+        return stopGroupsTable;
       }
 
       return {
@@ -270,6 +274,27 @@ describe("replaceReconstructedTrades", () => {
         initial_stop_price: 44,
       }),
     ]);
+    expect(stopGroupsTable.upsert).toHaveBeenCalledWith(
+      [
+        expect.objectContaining({
+          trade_id: "trade-long",
+          reconstruction_key: "account-1:LONG:long-open",
+          entry_date: "2026-01-08",
+          quantity: 10,
+          avg_entry_price: 20,
+          stop_loss_price: 18,
+        }),
+        expect.objectContaining({
+          trade_id: "trade-short",
+          reconstruction_key: "account-1:SHORT:short-open",
+          entry_date: "2026-01-08",
+          quantity: 5,
+          avg_entry_price: 40,
+          stop_loss_price: 44,
+        }),
+      ],
+      { onConflict: "user_id,reconstruction_key,entry_date" },
+    );
   });
 });
 
@@ -346,4 +371,15 @@ function emptyMarketDataClient() {
   };
 
   return client;
+}
+
+function emptyStopGroupsTable() {
+  return {
+    upsert: vi.fn().mockResolvedValue({ error: null }),
+    select: vi.fn(() => ({
+      eq: vi.fn(() => ({
+        in: vi.fn().mockResolvedValue({ data: [], error: null }),
+      })),
+    })),
+  };
 }

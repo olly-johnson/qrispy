@@ -94,3 +94,27 @@ describe("Market data cache migration", () => {
     expect(sql).toContain("using (true)");
   });
 });
+
+describe("Trade stop groups migration", () => {
+  it("adds per-entry stop groups with owner-scoped RLS", () => {
+    const sql = readFileSync(
+      join(
+        process.cwd(),
+        "supabase",
+        "migrations",
+        "20260531200000_add_trade_stop_groups.sql",
+      ),
+      "utf8",
+    );
+
+    expect(sql).toContain("create table public.trade_stop_groups");
+    expect(sql).toContain("reconstruction_key text not null");
+    expect(sql).toContain("unique (user_id, reconstruction_key, entry_date)");
+    expect(sql).toContain("trade_stop_groups_user_trade_idx");
+    expect(sql).toContain(
+      "alter table public.trade_stop_groups enable row level security",
+    );
+    expect(sql).toContain("owner can select trade stop groups");
+    expect(sql).toContain("owner can update trade stop groups");
+  });
+});

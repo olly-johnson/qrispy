@@ -16,6 +16,17 @@ export type DashboardPosition = {
   averagePrice: number | null;
   marketValue: number | null;
   unrealizedPnl: number | null;
+  stopGroups: PositionStopGroup[];
+};
+
+export type PositionStopGroup = {
+  tradeId: string;
+  entryDate: string;
+  direction: string;
+  quantity: number | null;
+  avgEntryPrice: number | null;
+  stopLossPrice: number | null;
+  stopUnrealizedPnl: number | null;
 };
 
 export type DashboardTrade = {
@@ -131,6 +142,12 @@ type TradeDetailClient = {
   };
 };
 
+type OpenTradeStopRow = OpenTradeStopInput & {
+  tradeId: string;
+  openedAt: string;
+  avgEntryPrice: number | null;
+};
+
 const TRADE_HISTORY_START_DATE = "2026-01-01T00:00:00.000Z";
 const TRADE_RECONSTRUCTION_LOOKBACK_START_DATE = "2025-12-01";
 
@@ -179,7 +196,28 @@ export async function getDashboardData(userId: string) {
 
   const positions = mapLatestPositions(positionsResult.data ?? []);
   const trades = (tradesResult.data ?? []).map(mapTrade);
-  const openTrades = (openTradesResult.data ?? []).map(mapOpenTradeStop);
+  const openTradeRows = openTradesResult.data ?? [];
+  const openTrades = openTradeRows.map(mapOpenTradeStop);
+  const stopGroupRows =
+    openTradeRows.length > 0
+      ? await loadStopGroupRows({
+          client: supabase,
+          userId,
+          tradeIds: openTradeRows.map((trade) => String(trade.id)),
+        })
+      : [];
+  const stopGroups = stopGroupRows.map(mapPersistedStopGroup);
+  const positionsWithStops = attachPositionStopGroups(positions, stopGroups);
+  const equityStopInputs =
+    stopGroups.length > 0
+      ? stopGroups.map((group) => ({
+          accountId: group.accountId,
+          symbol: group.symbol,
+          direction: group.direction,
+          quantity: group.quantity,
+          stopLossPrice: group.stopLossPrice,
+        }))
+      : openTrades;
   const summary = buildPortfolioSummary({
     snapshot: snapshotResult.data
       ? {
@@ -194,14 +232,14 @@ export async function getDashboardData(userId: string) {
           realizedPnl: numberOrNull(snapshotResult.data.realized_pnl),
         }
       : null,
-    positions,
-    openTrades,
-    openTradesCount: openTrades.length,
+    positions: positionsWithStops,
+    openTrades: equityStopInputs,
+    openTradesCount: equityStopInputs.length,
   });
 
   return {
     summary,
-    positions,
+    positions: positionsWithStops,
     trades,
     jobs: (jobsResult.data ?? []).map(mapJob),
     latestSnapshotAt: snapshotResult.data?.snapshot_at as string | undefined,
@@ -428,6 +466,30 @@ export function mapLatestPositions(rows: Record<string, unknown>[]) {
   return positions;
 }
 
+export function attachPositionStopGroups(
+  positions: DashboardPosition[],
+  openTrades: OpenTradeStopRow[],
+) {
+  return positions.map((position) => ({
+    ...position,
+    stopGroups: openTrades
+      .filter(
+        (trade) =>
+          trade.accountId === position.accountId && trade.symbol === position.symbol,
+      )
+      .sort((left, right) => left.openedAt.localeCompare(right.openedAt))
+      .map((trade) => ({
+        tradeId: trade.tradeId,
+        entryDate: trade.openedAt.slice(0, 10),
+        direction: trade.direction,
+        quantity: trade.quantity,
+        avgEntryPrice: trade.avgEntryPrice,
+        stopLossPrice: trade.stopLossPrice,
+        stopUnrealizedPnl: stopUnrealizedPnl(trade),
+      })),
+  }));
+}
+
 function mapPosition(row: Record<string, unknown>): DashboardPosition {
   return {
     id: String(row.id ?? `${String(row.account_id)}:${String(row.symbol)}`),
@@ -437,17 +499,85 @@ function mapPosition(row: Record<string, unknown>): DashboardPosition {
     averagePrice: numberOrNull(row.average_price),
     marketValue: numberOrNull(row.market_value),
     unrealizedPnl: numberOrNull(row.unrealized_pnl),
+    stopGroups: [],
   };
 }
 
-function mapOpenTradeStop(row: Record<string, unknown>): OpenTradeStopInput {
+function mapOpenTradeStop(row: Record<string, unknown>): OpenTradeStopRow {
   return {
+    tradeId: String(row.id),
     accountId: String(row.account_id ?? ""),
     symbol: String(row.symbol),
     direction: String(row.direction),
+    openedAt: String(row.opened_at),
     quantity: numberOrNull(row.max_abs_quantity ?? row.entry_quantity),
+    avgEntryPrice: numberOrNull(row.avg_entry_price),
     stopLossPrice: numberOrNull(row.initial_stop_price),
   };
+}
+
+function mapPersistedStopGroup(row: Record<string, unknown>): OpenTradeStopRow {
+  return {
+    tradeId: String(row.id),
+    accountId: String(row.account_id ?? ""),
+    symbol: String(row.symbol),
+    direction: String(row.direction),
+    openedAt: `${String(row.entry_date)}T00:00:00.000Z`,
+    quantity: numberOrNull(row.quantity),
+    avgEntryPrice: numberOrNull(row.avg_entry_price),
+    stopLossPrice: numberOrNull(row.stop_loss_price),
+  };
+}
+
+async function loadStopGroupRows(input: {
+  client: unknown;
+  userId: string;
+  tradeIds: string[];
+}) {
+  const client = input.client as {
+    from(table: "trade_stop_groups"): {
+      select(columns: "*"): {
+        eq(column: "user_id", value: string): {
+          in(column: "trade_id", values: string[]): {
+            order(
+              column: "entry_date",
+              options: { ascending: boolean },
+            ): Promise<{ data: Record<string, unknown>[] | null; error: unknown }>;
+          };
+        };
+      };
+    };
+  };
+
+  const { data, error } = await client
+    .from("trade_stop_groups")
+    .select("*")
+    .eq("user_id", input.userId)
+    .in("trade_id", input.tradeIds)
+    .order("entry_date", { ascending: true });
+
+  if (error) {
+    throw error;
+  }
+
+  return data ?? [];
+}
+
+function stopUnrealizedPnl(trade: OpenTradeStopRow) {
+  if (
+    trade.quantity == null ||
+    trade.avgEntryPrice == null ||
+    trade.stopLossPrice == null
+  ) {
+    return null;
+  }
+
+  const value =
+    trade.direction === "SHORT"
+      ? (trade.avgEntryPrice - trade.stopLossPrice) * trade.quantity
+      : (trade.stopLossPrice - trade.avgEntryPrice) * trade.quantity;
+
+  return roundMoney(value);
 }
 
 function mapTrade(row: Record<string, unknown>): DashboardTrade {
@@ -622,4 +752,8 @@ function numberOrNull(value: unknown) {
   }
 
   return null;
+}
+
+function roundMoney(value: number) {
+  return Math.round((value + Number.EPSILON) * 100) / 100;
 }

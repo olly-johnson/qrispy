@@ -80,6 +80,23 @@ type RebuildTradeClient = {
       error: unknown;
     }>;
   };
+  from(table: "trade_stop_groups"): {
+    select(columns: "reconstruction_key,entry_date,stop_loss_price"): {
+      eq(column: "user_id", value: string): {
+        in(
+          column: "reconstruction_key",
+          values: string[],
+        ): Promise<{
+          data: Record<string, unknown>[] | null;
+          error: unknown;
+        }>;
+      };
+    };
+    upsert(
+      values: Record<string, unknown>[],
+      options: { onConflict: string },
+    ): Promise<{ error: unknown }>;
+  };
 };
 
 const IGNORED_OPEN_DECEMBER_TRADE_SYMBOLS = new Set(["UGL", "AGQ", "ERO", "ROIV"]);
@@ -299,6 +316,12 @@ export async function replaceReconstructedTrades(input: {
   }
 
   const fills = ((data ?? []) as Record<string, unknown>[]).map(storedFillToCanonicalFill);
+  const trades = reconstructTrades(fills).filter(shouldPersistReconstructedTrade);
+  const existingStopGroups = await loadExistingStopGroups({
+    client,
+    trades,
+    userId: input.userId,
+  });
   const deleteResult = await client
     .from("trades")
     .delete()
@@ -311,16 +334,17 @@ export async function replaceReconstructedTrades(input: {
     throw deleteResult.error;
   }
 
-  const trades = reconstructTrades(fills).filter(shouldPersistReconstructedTrade);
   if (trades.length === 0) {
     return;
   }
+  const marketDataClient = input.marketDataClient ?? client;
+  const marketDataProvider =
+    input.marketDataProvider === undefined
+      ? createMassiveMarketDataProvider()
+      : input.marketDataProvider;
   const stopDefaults = await getStopDefaultsForOpenTrades({
-    client: input.marketDataClient ?? client,
-    provider:
-      input.marketDataProvider === undefined
-        ? createMassiveMarketDataProvider()
-        : input.marketDataProvider,
+    client: marketDataClient,
+    provider: marketDataProvider,
     trades,
   });
 
@@ -386,6 +410,222 @@ export async function replaceReconstructedTrades(input: {
       throw tradeFillResult.error;
     }
   }
+
+  await upsertTradeStopGroups({
+    client,
+    marketDataClient,
+    marketDataProvider,
+    trades,
+    fills,
+    tradeIdByReconstructionKey,
+    existingStopGroups,
+    userId: input.userId,
+  });
+}
+
+async function loadExistingStopGroups(input: {
+  client: RebuildTradeClient;
+  trades: ReturnType<typeof reconstructTrades>;
+  userId: string;
+}) {
+  const reconstructionKeys = input.trades
+    .filter((trade) => trade.status === "OPEN")
+    .map((trade) => trade.id);
+
+  if (reconstructionKeys.length === 0) {
+    return new Map<string, number | null>();
+  }
+
+  const result = await input.client
+    .from("trade_stop_groups")
+    .select("reconstruction_key,entry_date,stop_loss_price")
+    .eq("user_id", input.userId)
+    .in("reconstruction_key", reconstructionKeys);
+
+  if (result.error) {
+    throw result.error;
+  }
+
+  return new Map(
+    (result.data ?? []).map((row) => [
+      `${String(row.reconstruction_key)}:${String(row.entry_date)}`,
+      numberFrom(row, ["stop_loss_price"]) ?? null,
+    ]),
+  );
+}
+
+async function upsertTradeStopGroups(input: {
+  client: RebuildTradeClient;
+  marketDataClient: unknown;
+  marketDataProvider: MarketDataProvider | null;
+  trades: ReturnType<typeof reconstructTrades>;
+  fills: CanonicalFill[];
+  tradeIdByReconstructionKey: Map<string, string>;
+  existingStopGroups: Map<string, number | null>;
+  userId: string;
+}) {
+  const groups = buildOpenEntryStopGroups({
+    trades: input.trades,
+    fills: input.fills,
+    tradeIdByReconstructionKey: input.tradeIdByReconstructionKey,
+  });
+
+  if (groups.length === 0) {
+    return;
+  }
+
+  const defaults = await getStopDefaultsForEntryGroups({
+    client: input.marketDataClient,
+    provider: input.marketDataProvider,
+    groups,
+  });
+
+  const upsertResult = await input.client.from("trade_stop_groups").upsert(
+    groups.map((group) => {
+      const existingStop = input.existingStopGroups.get(
+        `${group.reconstructionKey}:${group.entryDate}`,
+      );
+      const defaultStop = defaults.get(group.key);
+      const stopLossPrice = existingStop ?? defaultStop?.price ?? null;
+      const riskPerShare =
+        stopLossPrice == null
+          ? null
+          : group.direction === "SHORT"
+            ? roundMoney(stopLossPrice - group.avgEntryPrice)
+            : roundMoney(group.avgEntryPrice - stopLossPrice);
+
+      return {
+        user_id: group.userId,
+        trade_id: group.tradeId,
+        reconstruction_key: group.reconstructionKey,
+        account_id: group.accountId,
+        symbol: group.symbol,
+        direction: group.direction,
+        entry_date: group.entryDate,
+        quantity: group.quantity,
+        avg_entry_price: group.avgEntryPrice,
+        stop_loss_price: stopLossPrice,
+        risk_per_share: riskPerShare,
+        risk_amount: riskPerShare == null ? null : roundMoney(riskPerShare * group.quantity),
+        updated_at: new Date().toISOString(),
+      };
+    }),
+    { onConflict: "user_id,reconstruction_key,entry_date" },
+  );
+
+  if (upsertResult.error) {
+    throw upsertResult.error;
+  }
+}
+
+function buildOpenEntryStopGroups(input: {
+  trades: ReturnType<typeof reconstructTrades>;
+  fills: CanonicalFill[];
+  tradeIdByReconstructionKey: Map<string, string>;
+}) {
+  const fillsById = new Map(input.fills.map((fill) => [fill.id, fill]));
+  const groups = new Map<
+    string,
+    {
+      key: string;
+      userId: string;
+      tradeId: string;
+      reconstructionKey: string;
+      accountId: string;
+      symbol: string;
+      direction: string;
+      entryDate: string;
+      quantity: number;
+      notional: number;
+      avgEntryPrice: number;
+    }
+  >();
+
+  for (const trade of input.trades.filter((candidate) => candidate.status === "OPEN")) {
+    const tradeId = input.tradeIdByReconstructionKey.get(trade.id);
+    if (!tradeId) {
+      continue;
+    }
+
+    for (const allocation of trade.allocations) {
+      if (allocation.allocationRole !== "ENTRY") {
+        continue;
+      }
+
+      const fill = fillsById.get(allocation.fillId);
+      if (!fill) {
+        continue;
+      }
+
+      const entryDate = fill.tradeDate;
+      const key = `${trade.id}:${entryDate}`;
+      const group =
+        groups.get(key) ??
+        {
+          key,
+          userId: trade.userId,
+          tradeId,
+          reconstructionKey: trade.id,
+          accountId: trade.accountId,
+          symbol: trade.symbol,
+          direction: trade.direction,
+          entryDate,
+          quantity: 0,
+          notional: 0,
+          avgEntryPrice: 0,
+        };
+
+      group.quantity += allocation.allocatedQuantity;
+      group.notional += allocation.allocatedQuantity * allocation.allocationPrice;
+      group.avgEntryPrice = roundMoney(group.notional / group.quantity);
+      groups.set(key, group);
+    }
+  }
+
+  return [...groups.values()];
+}
+
+async function getStopDefaultsForEntryGroups(input: {
+  client: unknown;
+  provider: MarketDataProvider | null;
+  groups: ReturnType<typeof buildOpenEntryStopGroups>;
+}) {
+  const stops = new Map<string, { price: number }>();
+
+  if (!input.provider) {
+    return stops;
+  }
+
+  await Promise.all(
+    input.groups.map(async (group) => {
+      try {
+        const bars = await getCachedOrFetchBars({
+          client: input.client,
+          provider: input.provider as MarketDataProvider,
+          request: {
+            symbol: group.symbol,
+            timeframe: "1d",
+            from: group.entryDate,
+            to: group.entryDate,
+            adjusted: false,
+          },
+        });
+        const entryDay = bars[0];
+
+        if (!entryDay) {
+          return;
+        }
+
+        stops.set(group.key, {
+          price: roundMoney(group.direction === "SHORT" ? entryDay.high : entryDay.low),
+        });
+      } catch {
+        // Missing market data should not block broker sync.
+      }
+    }),
+  );
+
+  return stops;
 }
 
 async function getStopDefaultsForOpenTrades(input: {

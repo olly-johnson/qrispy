@@ -1,6 +1,11 @@
 import { describe, expect, it, vi } from "vitest";
 
-import { getTradeDetail, getTradeHistory, mapLatestPositions } from "@/lib/app-data";
+import {
+  attachPositionStopGroups,
+  getTradeDetail,
+  getTradeHistory,
+  mapLatestPositions,
+} from "@/lib/app-data";
 
 describe("mapLatestPositions", () => {
   it("keeps only one row per account and symbol from the latest snapshot", () => {
@@ -46,6 +51,7 @@ describe("mapLatestPositions", () => {
         averagePrice: 102.36,
         marketValue: 614.16,
         unrealizedPnl: 204.72,
+        stopGroups: [],
       },
       {
         id: "latest-fcel",
@@ -55,6 +61,101 @@ describe("mapLatestPositions", () => {
         averagePrice: 14.47,
         marketValue: 336.84,
         unrealizedPnl: 134.26,
+        stopGroups: [],
+      },
+    ]);
+  });
+});
+
+describe("attachPositionStopGroups", () => {
+  it("adds one editable stop group per open entry date", () => {
+    const positions = mapLatestPositions([
+      {
+        id: "latest-docn",
+        account_id: "account-1",
+        snapshot_at: "2026-05-28T16:39:00Z",
+        symbol: "DOCN",
+        quantity: 15,
+        average_price: 100,
+        market_value: 1500,
+        unrealized_pnl: 0,
+      },
+      {
+        id: "latest-zsl",
+        account_id: "account-1",
+        snapshot_at: "2026-05-28T16:39:00Z",
+        symbol: "ZSL",
+        quantity: -5,
+        average_price: 40,
+        market_value: -225,
+        unrealized_pnl: -25,
+      },
+    ]);
+
+    expect(
+      attachPositionStopGroups(positions, [
+        {
+          tradeId: "trade-1",
+          accountId: "account-1",
+          symbol: "DOCN",
+          direction: "LONG",
+          openedAt: "2026-03-12T14:30:00.000Z",
+          quantity: 10,
+          avgEntryPrice: 90,
+          stopLossPrice: 86,
+        },
+        {
+          tradeId: "trade-2",
+          accountId: "account-1",
+          symbol: "DOCN",
+          direction: "LONG",
+          openedAt: "2026-04-04T14:30:00.000Z",
+          quantity: 5,
+          avgEntryPrice: 80,
+          stopLossPrice: 82,
+        },
+        {
+          tradeId: "trade-3",
+          accountId: "account-1",
+          symbol: "ZSL",
+          direction: "SHORT",
+          openedAt: "2026-01-29T14:30:00.000Z",
+          quantity: 5,
+          avgEntryPrice: 40,
+          stopLossPrice: 45,
+        },
+      ]),
+    ).toMatchObject([
+      {
+        symbol: "DOCN",
+        stopGroups: [
+          {
+            tradeId: "trade-1",
+            entryDate: "2026-03-12",
+            quantity: 10,
+            stopLossPrice: 86,
+            stopUnrealizedPnl: -40,
+          },
+          {
+            tradeId: "trade-2",
+            entryDate: "2026-04-04",
+            quantity: 5,
+            stopLossPrice: 82,
+            stopUnrealizedPnl: 10,
+          },
+        ],
+      },
+      {
+        symbol: "ZSL",
+        stopGroups: [
+          {
+            tradeId: "trade-3",
+            entryDate: "2026-01-29",
+            quantity: 5,
+            stopLossPrice: 45,
+            stopUnrealizedPnl: -25,
+          },
+        ],
       },
     ]);
   });
