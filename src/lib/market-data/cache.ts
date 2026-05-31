@@ -53,7 +53,7 @@ export async function getCachedOrFetchBars(input: {
     request: normalizedRequest,
   });
 
-  if (cached.length > 0) {
+  if (cached.length > 0 && cachedCoversRequest(cached, normalizedRequest)) {
     return cached;
   }
 
@@ -146,6 +146,34 @@ function storedBarFromOhlcvBar(bar: OhlcvBar) {
     adjusted: bar.adjusted,
     raw_payload: bar.rawPayload,
   };
+}
+
+function cachedCoversRequest(bars: OhlcvBar[], request: MarketDataRequest) {
+  const first = bars[0];
+  const last = bars[bars.length - 1];
+
+  if (!first || !last) {
+    return false;
+  }
+
+  const firstStart = Date.parse(first.barStartAt);
+  const lastStart = Date.parse(last.barStartAt);
+  const requestedStart = Date.parse(`${request.from}T00:00:00.000Z`);
+  const requestedEnd = Date.parse(`${request.to}T23:59:59.999Z`);
+  const tolerance = cacheCoverageToleranceMs(request.timeframe);
+
+  return firstStart <= requestedStart + tolerance && lastStart >= requestedEnd - tolerance;
+}
+
+function cacheCoverageToleranceMs(timeframe: MarketDataRequest["timeframe"]) {
+  if (timeframe === "1w") {
+    return 8 * 24 * 60 * 60 * 1000;
+  }
+  if (timeframe === "1d") {
+    return 4 * 24 * 60 * 60 * 1000;
+  }
+
+  return 24 * 60 * 60 * 1000;
 }
 
 async function recordRequest(input: {

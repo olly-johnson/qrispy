@@ -7,7 +7,7 @@ const cachedBar: OhlcvBar = {
   provider: "massive",
   symbol: "ZSL",
   timeframe: "1d",
-  barStartAt: "2026-01-02T00:00:00.000Z",
+  barStartAt: "2026-01-05T00:00:00.000Z",
   open: 10,
   high: 12,
   low: 9,
@@ -19,11 +19,12 @@ const cachedBar: OhlcvBar = {
 
 describe("getCachedOrFetchBars", () => {
   it("returns cached bars without calling the provider", async () => {
+    const monthEndBar = { ...cachedBar, barStartAt: "2026-01-30T00:00:00.000Z" };
     const provider: MarketDataProvider = {
       name: "massive",
       getAggregateBars: vi.fn(),
     };
-    const client = fakeMarketDataClient([cachedBar]);
+    const client = fakeMarketDataClient([cachedBar, monthEndBar]);
 
     await expect(
       getCachedOrFetchBars({
@@ -37,9 +38,36 @@ describe("getCachedOrFetchBars", () => {
           adjusted: false,
         },
       }),
-    ).resolves.toEqual([cachedBar]);
+    ).resolves.toEqual([cachedBar, monthEndBar]);
 
     expect(provider.getAggregateBars).not.toHaveBeenCalled();
+  });
+
+  it("fetches when cached bars do not cover the requested window", async () => {
+    const partialCachedBar = { ...cachedBar, barStartAt: "2026-01-15T00:00:00.000Z" };
+    const fetchedBar = { ...cachedBar, barStartAt: "2025-11-03T00:00:00.000Z" };
+    const provider: MarketDataProvider = {
+      name: "massive",
+      getAggregateBars: vi.fn().mockResolvedValue([fetchedBar]),
+    };
+    const client = fakeMarketDataClient([partialCachedBar]);
+
+    await expect(
+      getCachedOrFetchBars({
+        client,
+        provider,
+        request: {
+          symbol: "ZSL",
+          timeframe: "1d",
+          from: "2025-11-01",
+          to: "2026-01-31",
+          adjusted: false,
+        },
+      }),
+    ).resolves.toEqual([fetchedBar]);
+
+    expect(provider.getAggregateBars).toHaveBeenCalledOnce();
+    expect(client.upsertedBars).toHaveLength(1);
   });
 
   it("fetches, upserts, and records a successful request when cache is empty", async () => {

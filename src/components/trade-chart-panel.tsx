@@ -19,6 +19,8 @@ import type { TradeCharts, TradeChartDataset } from "@/lib/market-data/trade-cha
 
 const UP_COLOR = "#34d399";
 const DOWN_COLOR = "#fb7185";
+export const CHART_FONT_SIZE = 14;
+export const MARKER_SIZE = 1.8;
 export const PRICE_LINE_DISABLED_OPTIONS = {
   lastValueVisible: false,
   priceLineVisible: false,
@@ -110,6 +112,7 @@ function LightweightTradeChart({ chart }: { chart: TradeChartDataset }) {
       height: 520,
       layout: {
         background: { type: ColorType.Solid, color: "#080b10" },
+        fontSize: CHART_FONT_SIZE,
         textColor: "#a1a1aa",
       },
       grid: {
@@ -207,6 +210,7 @@ export function prepareChartData(chart: TradeChartDataset) {
         position: marker.role === "ENTRY" ? "belowBar" : "aboveBar",
         shape: marker.role === "ENTRY" ? "arrowUp" : "arrowDown",
         color: marker.role === "ENTRY" ? "#22d3ee" : "#fb7185",
+        size: MARKER_SIZE,
         text: formatMarkerQuantity(marker.quantity),
       }),
     ),

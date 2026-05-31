@@ -55,6 +55,33 @@ describe("getTradeCharts", () => {
 
     expect(provider.getAggregateBars).toHaveBeenCalledTimes(6);
   });
+
+  it("centers daily charts on the trade with at least 100 bars before entry", async () => {
+    const provider: MarketDataProvider = {
+      name: "massive",
+      getAggregateBars: vi.fn(async (request) =>
+        barsForRequest(request.timeframe, request.symbol),
+      ),
+    };
+    const client = emptyMarketDataClient();
+
+    const result = await getTradeCharts({
+      trade: tradeDetail(),
+      client,
+      provider,
+      now: new Date("2026-05-31T12:00:00.000Z"),
+    });
+    const daily = result.charts.find((chart) => chart.id === "daily");
+
+    expect(daily?.bars).toHaveLength(201);
+    expect(daily?.bars[100]?.barStartAt).toBe("2026-01-08T00:00:00.000Z");
+    expect(daily?.overlays.every((overlay) => overlay.points.length <= daily.bars.length)).toBe(
+      true,
+    );
+    expect(daily?.overlays.flatMap((overlay) => overlay.points).every((point) =>
+      daily.bars.some((bar) => bar.barStartAt.slice(0, 10) === point.time),
+    )).toBe(true);
+  });
 });
 
 function tradeDetail(): TradeDetail {
@@ -105,7 +132,7 @@ function tradeDetail(): TradeDetail {
 }
 
 function barsForRequest(timeframe: OhlcvBar["timeframe"], symbol: string) {
-  const count = timeframe === "1w" ? 260 : timeframe === "1d" ? 260 : 90;
+  const count = timeframe === "1w" ? 260 : timeframe === "1d" ? 380 : 90;
   const base =
     timeframe === "1w"
       ? Date.parse("2021-01-01T00:00:00.000Z")

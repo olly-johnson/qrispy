@@ -1,7 +1,9 @@
 import { describe, expect, it } from "vitest";
 
 import {
+  CHART_FONT_SIZE,
   MARKER_OPTIONS,
+  MARKER_SIZE,
   PRICE_LINE_DISABLED_OPTIONS,
   prepareChartData,
 } from "./trade-chart-panel";
@@ -40,12 +42,14 @@ describe("prepareChartData", () => {
         position: "belowBar",
         shape: "arrowUp",
         color: "#22d3ee",
+        size: 1.8,
         text: "10",
       }),
       expect.objectContaining({
         position: "aboveBar",
         shape: "arrowDown",
         color: "#fb7185",
+        size: 1.8,
         text: "5",
       }),
     ]);
@@ -64,5 +68,12 @@ describe("PRICE_LINE_DISABLED_OPTIONS", () => {
 describe("MARKER_OPTIONS", () => {
   it("renders trade markers above candles and overlays", () => {
     expect(MARKER_OPTIONS).toEqual({ zOrder: "top" });
+  });
+});
+
+describe("marker label visibility", () => {
+  it("uses larger marker glyphs and chart text for readable quantity labels", () => {
+    expect(MARKER_SIZE).toBe(1.8);
+    expect(CHART_FONT_SIZE).toBe(14);
   });
 });

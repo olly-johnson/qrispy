@@ -120,15 +120,23 @@ export async function getTradeCharts(input: GetTradeChartsInput): Promise<TradeC
       });
       const visibleBars =
         request.timeframe === "1d" || request.timeframe === "1w"
-          ? sliceAroundTrade(bars, input.trade.openedAt, endAnchor, 100, 50)
+          ? sliceAroundTrade(
+              bars,
+              input.trade.openedAt,
+              endAnchor,
+              request.timeframe,
+              100,
+              100,
+            )
           : bars;
+      const overlays = overlaysForTimeframe(bars, request.timeframe);
 
       return {
         id,
         label,
         timeframe: request.timeframe,
         bars: visibleBars,
-        overlays: overlaysForTimeframe(bars, request.timeframe),
+        overlays: filterOverlaysToBars(overlays, visibleBars, request.timeframe),
         markers: markersForFills(input.trade.fills, request.timeframe),
       };
     }),
@@ -195,6 +203,7 @@ function sliceAroundTrade(
   bars: OhlcvBar[],
   openedAt: string,
   closedAt: string,
+  timeframe: MarketDataTimeframe,
   before: number,
   after: number,
 ) {
@@ -202,8 +211,8 @@ function sliceAroundTrade(
     return [];
   }
 
-  const openTime = Date.parse(openedAt);
-  const closeTime = Date.parse(closedAt);
+  const openTime = chartAnchorTime(openedAt, timeframe);
+  const closeTime = chartAnchorTime(closedAt, timeframe);
   const openIndex = Math.max(
     0,
     bars.findIndex((bar) => Date.parse(bar.barStartAt) >= openTime),
@@ -216,6 +225,27 @@ function sliceAroundTrade(
   const end = Math.min(bars.length, (closeIndex === -1 ? bars.length - 1 : closeIndex) + after + 1);
 
   return bars.slice(start, end);
+}
+
+function chartAnchorTime(value: string, timeframe: MarketDataTimeframe) {
+  if (timeframe === "1d" || timeframe === "1w") {
+    return Date.parse(`${datePart(value)}T00:00:00.000Z`);
+  }
+
+  return Date.parse(value);
+}
+
+function filterOverlaysToBars(
+  overlays: TradeChartOverlay[],
+  bars: OhlcvBar[],
+  timeframe: MarketDataTimeframe,
+) {
+  const visibleTimes = new Set(bars.map((bar) => chartTime(bar, timeframe)));
+
+  return overlays.map((overlay) => ({
+    ...overlay,
+    points: overlay.points.filter((point) => visibleTimes.has(point.time)),
+  }));
 }
 
 function firstFillDate(fills: TradeDetailFill[], role: string) {
