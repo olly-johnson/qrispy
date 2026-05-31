@@ -11,6 +11,7 @@ import {
   type IChartApi,
   type ISeriesApi,
   type SeriesMarker,
+  type SeriesMarkersOptions,
   type Time,
 } from "lightweight-charts";
 
@@ -22,6 +23,9 @@ export const PRICE_LINE_DISABLED_OPTIONS = {
   lastValueVisible: false,
   priceLineVisible: false,
 } as const;
+export const MARKER_OPTIONS = {
+  zOrder: "top",
+} satisfies Partial<SeriesMarkersOptions>;
 
 export function TradeChartPanel({ charts }: { charts?: TradeCharts }) {
   const availableCharts = charts?.charts ?? [];
@@ -135,7 +139,7 @@ function LightweightTradeChart({ chart }: { chart: TradeChartDataset }) {
       ...PRICE_LINE_DISABLED_OPTIONS,
     });
     candleSeries.setData(prepared.candles);
-    createSeriesMarkers(candleSeries, prepared.markers);
+    createSeriesMarkers(candleSeries, prepared.markers, MARKER_OPTIONS);
 
     const volumeSeries = api.addSeries(HistogramSeries, {
       color: "rgba(148, 163, 184, 0.35)",
@@ -203,10 +207,14 @@ export function prepareChartData(chart: TradeChartDataset) {
         position: marker.role === "ENTRY" ? "belowBar" : "aboveBar",
         shape: marker.role === "ENTRY" ? "arrowUp" : "arrowDown",
         color: marker.role === "ENTRY" ? "#22d3ee" : "#fb7185",
-        text: marker.role,
+        text: formatMarkerQuantity(marker.quantity),
       }),
     ),
   };
+}
+
+function formatMarkerQuantity(value: number) {
+  return new Intl.NumberFormat("en-US", { maximumFractionDigits: 4 }).format(value);
 }
 
 function chartTime(value: string, timeframe: TradeChartDataset["timeframe"]): Time {

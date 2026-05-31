@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 
 import {
+  MARKER_OPTIONS,
   PRICE_LINE_DISABLED_OPTIONS,
   prepareChartData,
 } from "./trade-chart-panel";
@@ -18,6 +19,7 @@ describe("prepareChartData", () => {
         {
           time: "2026-01-08T15:18:00.000Z",
           price: 20,
+          quantity: 10,
           side: "SELL",
           role: "ENTRY",
           text: "ENTRY 10 @ $20",
@@ -25,6 +27,7 @@ describe("prepareChartData", () => {
         {
           time: "2026-01-08T19:05:00.000Z",
           price: 21,
+          quantity: 5,
           side: "BUY",
           role: "EXIT",
           text: "EXIT 10 @ $21",
@@ -37,13 +40,13 @@ describe("prepareChartData", () => {
         position: "belowBar",
         shape: "arrowUp",
         color: "#22d3ee",
-        text: "ENTRY",
+        text: "10",
       }),
       expect.objectContaining({
         position: "aboveBar",
         shape: "arrowDown",
         color: "#fb7185",
-        text: "EXIT",
+        text: "5",
       }),
     ]);
   });
@@ -55,5 +58,11 @@ describe("PRICE_LINE_DISABLED_OPTIONS", () => {
       lastValueVisible: false,
       priceLineVisible: false,
     });
+  });
+});
+
+describe("MARKER_OPTIONS", () => {
+  it("renders trade markers above candles and overlays", () => {
+    expect(MARKER_OPTIONS).toEqual({ zOrder: "top" });
   });
 });

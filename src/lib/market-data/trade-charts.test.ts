@@ -33,8 +33,8 @@ describe("getTradeCharts", () => {
             expect.objectContaining({ id: "sma200", color: "#3b82f6" }),
           ]),
           markers: expect.arrayContaining([
-            expect.objectContaining({ side: "BUY", role: "ENTRY" }),
-            expect.objectContaining({ side: "SELL", role: "EXIT" }),
+            expect.objectContaining({ side: "BUY", role: "ENTRY", quantity: 10 }),
+            expect.objectContaining({ side: "SELL", role: "EXIT", quantity: 10 }),
           ]),
         },
         expect.objectContaining({ id: "weekly", timeframe: "1w" }),

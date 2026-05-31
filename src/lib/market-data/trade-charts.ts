@@ -12,6 +12,7 @@ import type {
 export type TradeChartMarker = {
   time: string;
   price: number;
+  quantity: number;
   side: string;
   role: string;
   text: string;
@@ -183,6 +184,7 @@ function markersForFills(
   return fills.map((fill) => ({
     time: fillTime(fill.executedAt, timeframe),
     price: fill.allocationPrice ?? fill.price ?? 0,
+    quantity: fill.allocatedQuantity,
     side: fill.side,
     role: fill.allocationRole,
     text: `${fill.allocationRole} ${formatQuantity(fill.allocatedQuantity)} @ ${formatPrice(fill.allocationPrice ?? fill.price)}`,
