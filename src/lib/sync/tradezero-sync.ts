@@ -443,6 +443,10 @@ async function loadExistingStopGroups(input: {
     .in("reconstruction_key", reconstructionKeys);
 
   if (result.error) {
+    if (isMissingStopGroupsTableError(result.error)) {
+      return new Map<string, number | null>();
+    }
+
     throw result.error;
   }
 
@@ -514,8 +518,26 @@ async function upsertTradeStopGroups(input: {
   );
 
   if (upsertResult.error) {
+    if (isMissingStopGroupsTableError(upsertResult.error)) {
+      return;
+    }
+
     throw upsertResult.error;
   }
+}
+
+function isMissingStopGroupsTableError(error: unknown) {
+  if (!error || typeof error !== "object") {
+    return false;
+  }
+
+  const payload = error as { code?: unknown; message?: unknown };
+
+  return (
+    payload.code === "PGRST205" &&
+    typeof payload.message === "string" &&
+    payload.message.includes("trade_stop_groups")
+  );
 }
 
 function buildOpenEntryStopGroups(input: {

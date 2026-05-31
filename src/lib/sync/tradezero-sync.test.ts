@@ -296,6 +296,71 @@ describe("replaceReconstructedTrades", () => {
       { onConflict: "user_id,reconstruction_key,entry_date" },
     );
   });
+
+  it("continues rebuilding trades when stop group migration is not applied yet", async () => {
+    const fillsOrder = vi.fn().mockResolvedValue({
+      data: [
+        storedFill({
+          id: "long-open",
+          side: "BUY",
+          quantity: 10,
+          price: 20,
+          executedAt: "2026-01-08T15:18:00.000Z",
+          fees: 1,
+          symbol: "LONG",
+        }),
+      ],
+      error: null,
+    });
+    const fillsLte = vi.fn(() => ({ order: fillsOrder }));
+    const fillsGte = vi.fn(() => ({ lte: fillsLte }));
+    const fillsIn = vi.fn(() => ({ gte: fillsGte }));
+    const fillsEq = vi.fn(() => ({ in: fillsIn }));
+    const fillsSelect = vi.fn(() => ({ eq: fillsEq }));
+
+    const deleteLt = vi.fn().mockResolvedValue({ error: null });
+    const deleteGte = vi.fn(() => ({ lt: deleteLt }));
+    const deleteIn = vi.fn(() => ({ gte: deleteGte }));
+    const deleteEq = vi.fn(() => ({ in: deleteIn }));
+    const deleteTrades = vi.fn(() => ({ eq: deleteEq }));
+    const selectUpsertedTrades = vi.fn().mockResolvedValue({
+      data: [{ id: "trade-long", reconstruction_key: "account-1:LONG:long-open" }],
+      error: null,
+    });
+    const upsert = vi.fn(() => ({ select: selectUpsertedTrades }));
+    const insertTradeFills = vi.fn().mockResolvedValue({ error: null });
+    const stopGroupsTable = missingStopGroupsTable();
+    const from = vi.fn((table: string) => {
+      if (table === "fills") {
+        return { select: fillsSelect };
+      }
+      if (table === "trade_fills") {
+        return { insert: insertTradeFills };
+      }
+      if (table === "trade_stop_groups") {
+        return stopGroupsTable;
+      }
+
+      return {
+        delete: deleteTrades,
+        upsert,
+      };
+    });
+
+    await expect(
+      replaceReconstructedTrades({
+        client: { from },
+        marketDataProvider: null,
+        userId: "user-1",
+        accountIds: ["account-1"],
+        fromDate: "2026-01-01",
+        toDate: "2026-05-28",
+      }),
+    ).resolves.toBeUndefined();
+
+    expect(upsert).toHaveBeenCalledOnce();
+    expect(insertTradeFills).toHaveBeenCalledOnce();
+  });
 });
 
 function storedFill(input: {
@@ -379,6 +444,22 @@ function emptyStopGroupsTable() {
     select: vi.fn(() => ({
       eq: vi.fn(() => ({
         in: vi.fn().mockResolvedValue({ data: [], error: null }),
+      })),
+    })),
+  };
+}
+
+function missingStopGroupsTable() {
+  const error = {
+    code: "PGRST205",
+    message: "Could not find the table 'public.trade_stop_groups'",
+  };
+
+  return {
+    upsert: vi.fn().mockResolvedValue({ error }),
+    select: vi.fn(() => ({
+      eq: vi.fn(() => ({
+        in: vi.fn().mockResolvedValue({ data: null, error }),
       })),
     })),
   };

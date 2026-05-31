@@ -4,6 +4,7 @@ import {
   attachPositionStopGroups,
   getTradeDetail,
   getTradeHistory,
+  loadStopGroupRows,
   mapLatestPositions,
 } from "@/lib/app-data";
 
@@ -158,6 +159,30 @@ describe("attachPositionStopGroups", () => {
         ],
       },
     ]);
+  });
+});
+
+describe("loadStopGroupRows", () => {
+  it("falls back to no stop groups when the migration has not been applied", async () => {
+    const order = vi.fn().mockResolvedValue({
+      data: null,
+      error: {
+        code: "PGRST205",
+        message: "Could not find the table 'public.trade_stop_groups'",
+      },
+    });
+    const inFilter = vi.fn(() => ({ order }));
+    const eq = vi.fn(() => ({ in: inFilter }));
+    const select = vi.fn(() => ({ eq }));
+    const from = vi.fn(() => ({ select }));
+
+    await expect(
+      loadStopGroupRows({
+        client: { from },
+        userId: "user-1",
+        tradeIds: ["trade-1"],
+      }),
+    ).resolves.toEqual([]);
   });
 });
 

@@ -529,7 +529,7 @@ function mapPersistedStopGroup(row: Record<string, unknown>): OpenTradeStopRow {
   };
 }
 
-async function loadStopGroupRows(input: {
+export async function loadStopGroupRows(input: {
   client: unknown;
   userId: string;
   tradeIds: string[];
@@ -557,10 +557,28 @@ async function loadStopGroupRows(input: {
     .order("entry_date", { ascending: true });
 
   if (error) {
+    if (isMissingStopGroupsTableError(error)) {
+      return [];
+    }
+
     throw error;
   }
 
   return data ?? [];
+}
+
+function isMissingStopGroupsTableError(error: unknown) {
+  if (!error || typeof error !== "object") {
+    return false;
+  }
+
+  const payload = error as { code?: unknown; message?: unknown };
+
+  return (
+    payload.code === "PGRST205" &&
+    typeof payload.message === "string" &&
+    payload.message.includes("trade_stop_groups")
+  );
 }
 
 function stopUnrealizedPnl(trade: OpenTradeStopRow) {
