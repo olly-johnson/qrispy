@@ -1,4 +1,5 @@
 import { buildPortfolioSummary } from "@/lib/portfolio/metrics";
+import type { OpenTradeStopInput } from "@/lib/portfolio/metrics";
 import { createSupabaseServerClient } from "@/lib/supabase/server";
 import { createSupabaseAdminClient } from "@/lib/supabase/server";
 import { createMassiveMarketDataProvider } from "@/lib/market-data/massive";
@@ -9,6 +10,7 @@ import type { CanonicalFill } from "@/lib/trades/types";
 
 export type DashboardPosition = {
   id: string;
+  accountId: string;
   symbol: string;
   quantity: number;
   averagePrice: number | null;
@@ -139,7 +141,7 @@ export async function getDashboardData(userId: string) {
     return emptyDashboardData();
   }
 
-  const [snapshotResult, positionsResult, tradesResult, jobsResult] =
+  const [snapshotResult, positionsResult, tradesResult, openTradesResult, jobsResult] =
     await Promise.all([
       supabase
         .from("account_portfolio_snapshots")
@@ -161,6 +163,13 @@ export async function getDashboardData(userId: string) {
         .order("opened_at", { ascending: false })
         .limit(8),
       supabase
+        .from("trades")
+        .select("*")
+        .eq("user_id", userId)
+        .eq("status", "OPEN")
+        .order("opened_at", { ascending: false })
+        .limit(200),
+      supabase
         .from("job_runs")
         .select("*")
         .eq("user_id", userId)
@@ -170,6 +179,7 @@ export async function getDashboardData(userId: string) {
 
   const positions = mapLatestPositions(positionsResult.data ?? []);
   const trades = (tradesResult.data ?? []).map(mapTrade);
+  const openTrades = (openTradesResult.data ?? []).map(mapOpenTradeStop);
   const summary = buildPortfolioSummary({
     snapshot: snapshotResult.data
       ? {
@@ -185,7 +195,8 @@ export async function getDashboardData(userId: string) {
         }
       : null,
     positions,
-    openTradesCount: trades.filter((trade) => trade.status === "OPEN").length,
+    openTrades,
+    openTradesCount: openTrades.length,
   });
 
   return {
@@ -420,11 +431,22 @@ export function mapLatestPositions(rows: Record<string, unknown>[]) {
 function mapPosition(row: Record<string, unknown>): DashboardPosition {
   return {
     id: String(row.id ?? `${String(row.account_id)}:${String(row.symbol)}`),
+    accountId: String(row.account_id ?? ""),
     symbol: String(row.symbol),
     quantity: numberOrZero(row.quantity),
     averagePrice: numberOrNull(row.average_price),
     marketValue: numberOrNull(row.market_value),
     unrealizedPnl: numberOrNull(row.unrealized_pnl),
+  };
+}
+
+function mapOpenTradeStop(row: Record<string, unknown>): OpenTradeStopInput {
+  return {
+    accountId: String(row.account_id ?? ""),
+    symbol: String(row.symbol),
+    direction: String(row.direction),
+    quantity: numberOrNull(row.max_abs_quantity ?? row.entry_quantity),
+    stopLossPrice: numberOrNull(row.initial_stop_price),
   };
 }
 

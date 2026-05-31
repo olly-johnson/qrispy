@@ -39,7 +39,12 @@ export default async function DashboardPage() {
       ) : null}
 
       <section className="mt-6 grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
-        <MetricCard label="Equity" value={formatMoney(metrics.equity.value)} accent="emerald" />
+        <MetricCard
+          label="Equity"
+          metric={metrics.equity}
+          value={formatMoney(metrics.equity.value)}
+          accent="emerald"
+        />
         <MetricCard label="Cash" value={formatMoney(metrics.cash.value)} />
         <MetricCard
           label="Buying Power"

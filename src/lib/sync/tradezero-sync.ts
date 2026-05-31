@@ -11,6 +11,9 @@ import {
   buildTradeZeroPortfolioSnapshot,
   buildTradeZeroPositionSnapshot,
 } from "@/lib/tradezero/snapshot";
+import { getCachedOrFetchBars } from "@/lib/market-data/cache";
+import { createMassiveMarketDataProvider } from "@/lib/market-data/massive";
+import type { MarketDataProvider } from "@/lib/market-data/types";
 import { reconstructTrades } from "@/lib/trades/reconstruct";
 import type { CanonicalFill } from "@/lib/trades/types";
 import { createSupabaseAdminClient } from "@/lib/supabase/server";
@@ -264,6 +267,8 @@ export async function runTradeZeroSync(input: SyncInput) {
 
 export async function replaceReconstructedTrades(input: {
   client?: unknown;
+  marketDataClient?: unknown;
+  marketDataProvider?: MarketDataProvider | null;
   userId: string;
   accountIds: string[];
   fromDate: string;
@@ -310,26 +315,41 @@ export async function replaceReconstructedTrades(input: {
   if (trades.length === 0) {
     return;
   }
+  const stopDefaults = await getStopDefaultsForOpenTrades({
+    client: input.marketDataClient ?? client,
+    provider:
+      input.marketDataProvider === undefined
+        ? createMassiveMarketDataProvider()
+        : input.marketDataProvider,
+    trades,
+  });
 
   const upsertResult = await client.from("trades").upsert(
-    trades.map((trade) => ({
-      user_id: trade.userId,
-      account_id: trade.accountId,
-      reconstruction_key: trade.id,
-      symbol: trade.symbol,
-      asset_class: trade.assetClass,
-      direction: trade.direction,
-      opened_at: trade.openedAt,
-      closed_at: trade.closedAt,
-      status: trade.status,
-      entry_quantity: trade.entryQuantity,
-      max_abs_quantity: trade.maxAbsQuantity,
-      avg_entry_price: trade.avgEntryPrice,
-      avg_exit_price: trade.avgExitPrice,
-      realized_pnl: trade.realizedPnl,
-      total_fees: trade.totalFees,
-      reconstruction_version: trade.reconstructionVersion,
-    })),
+    trades.map((trade) => {
+      const stop = stopDefaults.get(trade.id);
+
+      return {
+        user_id: trade.userId,
+        account_id: trade.accountId,
+        reconstruction_key: trade.id,
+        symbol: trade.symbol,
+        asset_class: trade.assetClass,
+        direction: trade.direction,
+        opened_at: trade.openedAt,
+        closed_at: trade.closedAt,
+        status: trade.status,
+        entry_quantity: trade.entryQuantity,
+        max_abs_quantity: trade.maxAbsQuantity,
+        avg_entry_price: trade.avgEntryPrice,
+        avg_exit_price: trade.avgExitPrice,
+        realized_pnl: trade.realizedPnl,
+        total_fees: trade.totalFees,
+        initial_stop_price: stop?.price ?? null,
+        initial_risk_per_share: stop?.riskPerShare ?? null,
+        initial_risk_amount: stop?.riskAmount ?? null,
+        reconstruction_version: trade.reconstructionVersion,
+      };
+    }),
     { onConflict: "user_id,reconstruction_key" },
   ).select("id,reconstruction_key");
 
@@ -366,6 +386,63 @@ export async function replaceReconstructedTrades(input: {
       throw tradeFillResult.error;
     }
   }
+}
+
+async function getStopDefaultsForOpenTrades(input: {
+  client: unknown;
+  provider: MarketDataProvider | null;
+  trades: ReturnType<typeof reconstructTrades>;
+}) {
+  const stops = new Map<
+    string,
+    { price: number; riskPerShare: number; riskAmount: number }
+  >();
+
+  if (!input.provider) {
+    return stops;
+  }
+
+  await Promise.all(
+    input.trades
+      .filter((trade) => trade.status === "OPEN")
+      .map(async (trade) => {
+        try {
+          const entryDate = trade.openedAt.slice(0, 10);
+          const bars = await getCachedOrFetchBars({
+            client: input.client,
+            provider: input.provider as MarketDataProvider,
+            request: {
+              symbol: trade.symbol,
+              timeframe: "1d",
+              from: entryDate,
+              to: entryDate,
+              adjusted: false,
+            },
+          });
+          const entryDay = bars[0];
+
+          if (!entryDay) {
+            return;
+          }
+
+          const price = trade.direction === "SHORT" ? entryDay.high : entryDay.low;
+          const riskPerShare =
+            trade.direction === "SHORT"
+              ? price - trade.avgEntryPrice
+              : trade.avgEntryPrice - price;
+
+          stops.set(trade.id, {
+            price: roundMoney(price),
+            riskPerShare: roundMoney(riskPerShare),
+            riskAmount: roundMoney(riskPerShare * trade.maxAbsQuantity),
+          });
+        } catch {
+          // Missing market data should not block broker sync.
+        }
+      }),
+  );
+
+  return stops;
 }
 
 function shouldPersistReconstructedTrade(trade: ReturnType<typeof reconstructTrades>[number]) {
@@ -413,6 +490,10 @@ function nextDate(date: string) {
   const parsed = new Date(`${date}T00:00:00.000Z`);
   parsed.setUTCDate(parsed.getUTCDate() + 1);
   return parsed.toISOString();
+}
+
+function roundMoney(value: number) {
+  return Math.round((value + Number.EPSILON) * 10000) / 10000;
 }
 
 function numberFrom(

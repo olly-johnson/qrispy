@@ -171,6 +171,106 @@ describe("replaceReconstructedTrades", () => {
       }),
     ]);
   });
+
+  it("sets default stops for open trades from the entry day range", async () => {
+    const fillsOrder = vi.fn().mockResolvedValue({
+      data: [
+        storedFill({
+          id: "long-open",
+          side: "BUY",
+          quantity: 10,
+          price: 20,
+          executedAt: "2026-01-08T15:18:00.000Z",
+          fees: 1,
+          symbol: "LONG",
+        }),
+        storedFill({
+          id: "short-open",
+          side: "SELL",
+          quantity: 5,
+          price: 40,
+          executedAt: "2026-01-08T15:20:00.000Z",
+          fees: 1,
+          symbol: "SHORT",
+        }),
+      ],
+      error: null,
+    });
+    const fillsLte = vi.fn(() => ({ order: fillsOrder }));
+    const fillsGte = vi.fn(() => ({ lte: fillsLte }));
+    const fillsIn = vi.fn(() => ({ gte: fillsGte }));
+    const fillsEq = vi.fn(() => ({ in: fillsIn }));
+    const fillsSelect = vi.fn(() => ({ eq: fillsEq }));
+
+    const deleteLt = vi.fn().mockResolvedValue({ error: null });
+    const deleteGte = vi.fn(() => ({ lt: deleteLt }));
+    const deleteIn = vi.fn(() => ({ gte: deleteGte }));
+    const deleteEq = vi.fn(() => ({ in: deleteIn }));
+    const deleteTrades = vi.fn(() => ({ eq: deleteEq }));
+    const selectUpsertedTrades = vi.fn().mockResolvedValue({
+      data: [
+        { id: "trade-long", reconstruction_key: "account-1:LONG:long-open" },
+        { id: "trade-short", reconstruction_key: "account-1:SHORT:short-open" },
+      ],
+      error: null,
+    });
+    const upsert = vi.fn(() => ({ select: selectUpsertedTrades }));
+    const insertTradeFills = vi.fn().mockResolvedValue({ error: null });
+    const from = vi.fn((table: string) => {
+      if (table === "fills") {
+        return { select: fillsSelect };
+      }
+      if (table === "trade_fills") {
+        return { insert: insertTradeFills };
+      }
+
+      return {
+        delete: deleteTrades,
+        upsert,
+      };
+    });
+    const marketDataProvider = {
+      name: "massive",
+      getAggregateBars: vi.fn(async (request) => [
+        {
+          provider: "massive",
+          symbol: request.symbol,
+          timeframe: "1d" as const,
+          barStartAt: "2026-01-08T00:00:00.000Z",
+          open: 30,
+          high: request.symbol === "SHORT" ? 44 : 22,
+          low: request.symbol === "LONG" ? 18 : 36,
+          close: 31,
+          volume: 1000,
+          adjusted: false,
+          rawPayload: {},
+        },
+      ]),
+    };
+
+    await replaceReconstructedTrades({
+      client: { from },
+      marketDataClient: emptyMarketDataClient(),
+      marketDataProvider,
+      userId: "user-1",
+      accountIds: ["account-1"],
+      fromDate: "2026-01-01",
+      toDate: "2026-05-28",
+    });
+
+    expect(upsert.mock.calls[0][0]).toEqual([
+      expect.objectContaining({
+        symbol: "LONG",
+        status: "OPEN",
+        initial_stop_price: 18,
+      }),
+      expect.objectContaining({
+        symbol: "SHORT",
+        status: "OPEN",
+        initial_stop_price: 44,
+      }),
+    ]);
+  });
 });
 
 function storedFill(input: {
@@ -205,4 +305,45 @@ function storedFill(input: {
     net_proceeds: null,
     raw_payload: {},
   };
+}
+
+function emptyMarketDataClient() {
+  const client = {
+    upsertedBars: [] as Record<string, unknown>[],
+    insertedRequests: [] as Record<string, unknown>[],
+    from(table: string) {
+      if (table === "ohlcv_bars") {
+        return {
+          select: () => ({
+            eq: () => ({
+              eq: () => ({
+                eq: () => ({
+                  eq: () => ({
+                    gte: () => ({
+                      lte: () => ({
+                        order: vi.fn().mockResolvedValue({ data: [], error: null }),
+                      }),
+                    }),
+                  }),
+                }),
+              }),
+            }),
+          }),
+          upsert: vi.fn((rows) => {
+            client.upsertedBars.push(...rows);
+            return Promise.resolve({ error: null });
+          }),
+        };
+      }
+
+      return {
+        insert: vi.fn((row) => {
+          client.insertedRequests.push(row);
+          return Promise.resolve({ error: null });
+        }),
+      };
+    },
+  };
+
+  return client;
 }

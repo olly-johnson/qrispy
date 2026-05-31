@@ -42,6 +42,9 @@ export function provenanceLabel(metric: ProvenancedMetric) {
   if (metric.provenance === "computed_from_fills") {
     return "Computed from reconstructed fills";
   }
+  if (metric.provenance === "computed_from_stops") {
+    return "Computed from current stop losses";
+  }
   if (metric.provenance === "missing") {
     return "Missing from latest sync";
   }

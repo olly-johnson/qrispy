@@ -40,6 +40,7 @@ describe("mapLatestPositions", () => {
     ).toEqual([
       {
         id: "latest-docn",
+        accountId: "account-1",
         symbol: "DOCN",
         quantity: 4,
         averagePrice: 102.36,
@@ -48,6 +49,7 @@ describe("mapLatestPositions", () => {
       },
       {
         id: "latest-fcel",
+        accountId: "account-1",
         symbol: "FCEL",
         quantity: 14,
         averagePrice: 14.47,
