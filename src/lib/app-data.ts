@@ -1,5 +1,9 @@
 import { buildPortfolioSummary } from "@/lib/portfolio/metrics";
 import { createSupabaseServerClient } from "@/lib/supabase/server";
+import { createSupabaseAdminClient } from "@/lib/supabase/server";
+import { createMassiveMarketDataProvider } from "@/lib/market-data/massive";
+import { getTradeCharts, type TradeCharts } from "@/lib/market-data/trade-charts";
+import type { MarketDataProvider } from "@/lib/market-data/types";
 import { reconstructTrades } from "@/lib/trades/reconstruct";
 import type { CanonicalFill } from "@/lib/trades/types";
 
@@ -44,6 +48,7 @@ export type TradeDetailFill = {
 
 export type TradeDetail = DashboardTrade & {
   fills: TradeDetailFill[];
+  charts?: TradeCharts;
 };
 
 export type JobRun = {
@@ -226,7 +231,12 @@ export async function getTradeHistory(
 export async function getTradeDetail(
   userId: string,
   tradeId: string,
-  options: { client?: unknown; now?: Date } = {},
+  options: {
+    client?: unknown;
+    marketDataClient?: unknown;
+    marketDataProvider?: MarketDataProvider | null;
+    now?: Date;
+  } = {},
 ): Promise<TradeDetail | null> {
   const supabase =
     (options.client as TradeDetailClient | undefined) ??
@@ -275,10 +285,42 @@ export async function getTradeDetail(
     });
   }
 
-  return {
+  const trade = {
     ...mapTrade(data),
     fills,
   };
+
+  const marketDataProvider =
+    options.marketDataProvider === undefined
+      ? createMassiveMarketDataProvider()
+      : options.marketDataProvider;
+  const marketDataClient =
+    options.marketDataClient ?? createSupabaseAdminClient();
+
+  if (marketDataClient && marketDataProvider) {
+    let charts: TradeCharts;
+
+    try {
+      charts = await getTradeCharts({
+        trade,
+        client: marketDataClient,
+        provider: marketDataProvider,
+        now: options.now,
+      });
+    } catch (error) {
+      charts = {
+        charts: [],
+        error: `Market data unavailable: ${errorMessage(error)}`,
+      };
+    }
+
+    return {
+      ...trade,
+      charts,
+    };
+  }
+
+  return trade;
 }
 
 async function reconstructTradeDetailFills(input: {
@@ -538,6 +580,10 @@ function overlapsTradeHistoryWindow(row: Record<string, unknown>) {
   const closedAt = row.closed_at ? String(row.closed_at) : null;
 
   return closedAt == null || closedAt >= TRADE_HISTORY_START_DATE;
+}
+
+function errorMessage(error: unknown) {
+  return error instanceof Error ? error.message : String(error);
 }
 
 function numberOrZero(value: unknown) {

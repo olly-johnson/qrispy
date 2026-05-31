@@ -316,6 +316,199 @@ describe("getTradeDetail", () => {
       ],
     });
   });
+
+  it("adds trade chart datasets when a market data provider is available", async () => {
+    const tradeSecondEq = vi.fn(() => ({
+      maybeSingle: vi.fn().mockResolvedValue({
+        data: {
+          id: "trade-1",
+          account_id: "account-1",
+          reconstruction_key: "account-1:ZSL:fill-1",
+          symbol: "ZSL",
+          direction: "LONG",
+          status: "CLOSED",
+          opened_at: "2026-01-08T15:18:00.000Z",
+          closed_at: "2026-01-08T19:05:00.000Z",
+          entry_quantity: 10,
+          max_abs_quantity: 10,
+          avg_entry_price: 20,
+          avg_exit_price: 21,
+          realized_pnl: 8,
+          total_fees: 2,
+        },
+        error: null,
+      }),
+    }));
+    const tradeFirstEq = vi.fn(() => ({ eq: tradeSecondEq }));
+    const tradeSelect = vi.fn(() => ({ eq: tradeFirstEq }));
+    const tradeFillsOrder = vi.fn().mockResolvedValue({
+      data: [
+        {
+          allocated_quantity: 10,
+          allocation_role: "ENTRY",
+          allocation_price: 20,
+          fills: detailStoredFill({
+            id: "fill-1",
+            side: "BUY",
+            quantity: 10,
+            price: 20,
+            executedAt: "2026-01-08T15:18:00.000Z",
+            fees: 1,
+          }),
+        },
+      ],
+      error: null,
+    });
+    const tradeFillsSecondEq = vi.fn(() => ({ order: tradeFillsOrder }));
+    const tradeFillsFirstEq = vi.fn(() => ({ eq: tradeFillsSecondEq }));
+    const tradeFillsSelect = vi.fn(() => ({ eq: tradeFillsFirstEq }));
+    const marketDataOrder = vi.fn().mockResolvedValue({ data: [], error: null });
+    const marketDataSelect = vi.fn(() => ({
+      eq: () => ({
+        eq: () => ({
+          eq: () => ({
+            eq: () => ({
+              gte: () => ({
+                lte: () => ({ order: marketDataOrder }),
+              }),
+            }),
+          }),
+        }),
+      }),
+    }));
+    const marketDataUpsert = vi.fn().mockResolvedValue({ error: null });
+    const requestInsert = vi.fn().mockResolvedValue({ error: null });
+    const client = {
+      from: vi.fn((table: string) => {
+        if (table === "trades") {
+          return { select: tradeSelect };
+        }
+        if (table === "trade_fills") {
+          return { select: tradeFillsSelect };
+        }
+        if (table === "ohlcv_bars") {
+          return { select: marketDataSelect, upsert: marketDataUpsert };
+        }
+
+        return { insert: requestInsert };
+      }),
+    };
+    const provider = {
+      name: "massive",
+      getAggregateBars: vi.fn().mockResolvedValue([]),
+    };
+
+    await expect(
+      getTradeDetail("user-1", "trade-1", {
+        client,
+        marketDataClient: client,
+        marketDataProvider: provider,
+      }),
+    ).resolves.toMatchObject({
+      charts: {
+        charts: expect.arrayContaining([
+          expect.objectContaining({ id: "daily" }),
+          expect.objectContaining({ id: "weekly" }),
+        ]),
+        error: null,
+      },
+    });
+  });
+
+  it("keeps the trade detail page available when market data fails", async () => {
+    const tradeSecondEq = vi.fn(() => ({
+      maybeSingle: vi.fn().mockResolvedValue({
+        data: {
+          id: "trade-1",
+          account_id: "account-1",
+          reconstruction_key: "account-1:ZSL:fill-1",
+          symbol: "ZSL",
+          direction: "LONG",
+          status: "CLOSED",
+          opened_at: "2026-01-08T15:18:00.000Z",
+          closed_at: "2026-01-08T19:05:00.000Z",
+          entry_quantity: 10,
+          max_abs_quantity: 10,
+          avg_entry_price: 20,
+          avg_exit_price: 21,
+          realized_pnl: 8,
+          total_fees: 2,
+        },
+        error: null,
+      }),
+    }));
+    const tradeFirstEq = vi.fn(() => ({ eq: tradeSecondEq }));
+    const tradeSelect = vi.fn(() => ({ eq: tradeFirstEq }));
+    const tradeFillsOrder = vi.fn().mockResolvedValue({
+      data: [
+        {
+          allocated_quantity: 10,
+          allocation_role: "ENTRY",
+          allocation_price: 20,
+          fills: detailStoredFill({
+            id: "fill-1",
+            side: "BUY",
+            quantity: 10,
+            price: 20,
+            executedAt: "2026-01-08T15:18:00.000Z",
+            fees: 1,
+          }),
+        },
+      ],
+      error: null,
+    });
+    const tradeFillsSecondEq = vi.fn(() => ({ order: tradeFillsOrder }));
+    const tradeFillsFirstEq = vi.fn(() => ({ eq: tradeFillsSecondEq }));
+    const tradeFillsSelect = vi.fn(() => ({ eq: tradeFillsFirstEq }));
+    const client = {
+      from: vi.fn((table: string) => {
+        if (table === "trades") {
+          return { select: tradeSelect };
+        }
+
+        return { select: tradeFillsSelect };
+      }),
+    };
+    const marketDataOrder = vi.fn().mockResolvedValue({
+      data: null,
+      error: new Error("relation ohlcv_bars does not exist"),
+    });
+    const marketDataClient = {
+      from: vi.fn(() => ({
+        select: () => ({
+          eq: () => ({
+            eq: () => ({
+              eq: () => ({
+                eq: () => ({
+                  gte: () => ({
+                    lte: () => ({ order: marketDataOrder }),
+                  }),
+                }),
+              }),
+            }),
+          }),
+        }),
+      })),
+    };
+    const provider = {
+      name: "massive",
+      getAggregateBars: vi.fn().mockResolvedValue([]),
+    };
+
+    await expect(
+      getTradeDetail("user-1", "trade-1", {
+        client,
+        marketDataClient,
+        marketDataProvider: provider,
+      }),
+    ).resolves.toMatchObject({
+      id: "trade-1",
+      charts: {
+        charts: [],
+        error: "Market data unavailable: relation ohlcv_bars does not exist",
+      },
+    });
+  });
 });
 
 function detailStoredFill(input: {

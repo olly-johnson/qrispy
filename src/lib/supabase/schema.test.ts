@@ -67,3 +67,30 @@ describe("Supabase foreign key index migration", () => {
     }
   });
 });
+
+describe("Market data cache migration", () => {
+  it("adds OHLCV bar and provider request cache tables with RLS", () => {
+    const sql = readFileSync(
+      join(
+        process.cwd(),
+        "supabase",
+        "migrations",
+        "20260531100000_add_market_data_cache.sql",
+      ),
+      "utf8",
+    );
+
+    for (const table of ["ohlcv_bars", "market_data_requests"]) {
+      expect(sql).toContain(`create table public.${table}`);
+      expect(sql).toContain(`alter table public.${table} enable row level security`);
+    }
+
+    expect(sql).toContain(
+      "unique (provider, symbol, timeframe, adjusted, bar_start_at)",
+    );
+    expect(sql).toContain("ohlcv_bars_symbol_timeframe_start_idx");
+    expect(sql).toContain("market_data_requests_provider_symbol_created_idx");
+    expect(sql).toContain("to authenticated");
+    expect(sql).toContain("using (true)");
+  });
+});
