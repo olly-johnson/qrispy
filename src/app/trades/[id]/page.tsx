@@ -4,6 +4,7 @@ import { ArrowLeft } from "lucide-react";
 
 import { AppShell } from "@/components/app-shell";
 import { formatDateTime, formatMoney } from "@/components/format";
+import { TradeChartPanel } from "@/components/trade-chart-panel";
 import { requireUser } from "@/lib/auth/session";
 import { getTradeDetail } from "@/lib/app-data";
 
@@ -68,6 +69,8 @@ export default async function TradeDetailPage({
         <Detail label="P&L / Share" value={formatPrice(pnlPerShare)} />
         <Detail label="Fees" value={formatMoney(trade.totalFees)} />
       </section>
+
+      <TradeChartPanel charts={trade.charts} />
 
       <section className="mt-8">
         <h2 className="text-lg font-semibold">Fill Path</h2>

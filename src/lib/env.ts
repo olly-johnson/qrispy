@@ -13,6 +13,11 @@ export type TradeZeroConfig = {
   apiSecretKey: string;
 };
 
+export type MassiveConfig = {
+  apiKey: string;
+  baseUrl: string;
+};
+
 export function getPublicSupabaseConfig(): PublicSupabaseConfig | null {
   const url = process.env.NEXT_PUBLIC_SUPABASE_URL;
   const anonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
@@ -55,6 +60,20 @@ export function getTradeZeroConfig(): TradeZeroConfig | null {
     baseUrl: baseUrl.replace(/\/$/, ""),
     apiKeyId,
     apiSecretKey,
+  };
+}
+
+export function getMassiveConfig(): MassiveConfig | null {
+  const apiKey = process.env.MASSIVE_API_KEY;
+  const baseUrl = process.env.MASSIVE_API_BASE_URL ?? "https://api.massive.com";
+
+  if (!apiKey) {
+    return null;
+  }
+
+  return {
+    apiKey,
+    baseUrl: baseUrl.replace(/\/$/, ""),
   };
 }
 
