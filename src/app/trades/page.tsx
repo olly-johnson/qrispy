@@ -1,15 +1,16 @@
 import Link from "next/link";
+import { BarChart3 } from "lucide-react";
 
 import { AppShell } from "@/components/app-shell";
 import { formatDateTime, formatMoney } from "@/components/format";
 import { requireUser } from "@/lib/auth/session";
-import { getDashboardData } from "@/lib/app-data";
+import { getTradeHistory } from "@/lib/app-data";
 
 export const dynamic = "force-dynamic";
 
 export default async function TradesPage() {
   const user = await requireUser();
-  const data = await getDashboardData(user.id);
+  const trades = await getTradeHistory(user.id);
 
   return (
     <AppShell user={user}>
@@ -24,11 +25,12 @@ export default async function TradesPage() {
               <th className="px-4 py-3">Direction</th>
               <th className="px-4 py-3 text-right">Realized</th>
               <th className="px-4 py-3 text-right">Fees</th>
+              <th className="px-4 py-3 text-right">Analyse</th>
             </tr>
           </thead>
           <tbody className="divide-y divide-white/10">
-            {data.trades.map((trade) => (
-              <tr key={trade.id}>
+            {trades.map((trade) => (
+              <tr key={trade.id} className="transition hover:bg-white/[0.035]">
                 <td className="px-4 py-3">
                   <Link href={`/trades/${trade.id}`} className="font-mono text-cyan-200">
                     {trade.symbol}
@@ -43,11 +45,20 @@ export default async function TradesPage() {
                 <td className="px-4 py-3 text-right font-mono">
                   {formatMoney(trade.totalFees)}
                 </td>
+                <td className="px-4 py-3 text-right">
+                  <Link
+                    href={`/trades/${trade.id}`}
+                    className="inline-flex h-8 items-center gap-2 rounded-md border border-white/10 px-3 text-xs font-medium text-zinc-200 transition hover:border-cyan-300/50 hover:text-cyan-200"
+                  >
+                    <BarChart3 className="h-3.5 w-3.5" />
+                    Open
+                  </Link>
+                </td>
               </tr>
             ))}
-            {data.trades.length === 0 ? (
+            {trades.length === 0 ? (
               <tr>
-                <td className="px-4 py-8 text-zinc-500" colSpan={6}>
+                <td className="px-4 py-8 text-zinc-500" colSpan={7}>
                   Sync TradeZero to reconstruct trades.
                 </td>
               </tr>

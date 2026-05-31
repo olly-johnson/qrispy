@@ -32,7 +32,7 @@ describe("recordTradeZeroSyncQueued", () => {
         status: "queued",
         idempotency_key: "tradezero-sync:user-123:manual:2026-05-28",
         metadata: {
-          from_date: "2026-01-01",
+          from_date: "2025-12-01",
           requested_by: "manual",
           sync_scope: "backfill",
           to_date: "2026-05-28",

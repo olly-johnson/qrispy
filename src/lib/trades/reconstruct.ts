@@ -21,14 +21,18 @@ const RECONSTRUCTION_VERSION = 1;
 export function reconstructTrades(fills: CanonicalFill[]): ReconstructedTrade[] {
   const sorted = [...fills].sort(compareFills);
   const trades: ReconstructedTrade[] = [];
-  let current: WorkingTrade | null = null;
+  const currentByInstrument = new Map<string, WorkingTrade>();
 
   for (const fill of sorted) {
     let remainingSignedQuantity = signedQuantity(fill);
+    const key = instrumentKey(fill);
 
     while (remainingSignedQuantity !== 0) {
+      let current = currentByInstrument.get(key) ?? null;
+
       if (!current) {
         current = startTrade(fill, remainingSignedQuantity);
+        currentByInstrument.set(key, current);
       }
 
       if (sameDirection(current.netQuantity, remainingSignedQuantity)) {
@@ -47,12 +51,12 @@ export function reconstructTrades(fills: CanonicalFill[]): ReconstructedTrade[] 
 
       if (current.netQuantity === 0) {
         trades.push(finalizeTrade(current, fill.executedAt));
-        current = null;
+        currentByInstrument.delete(key);
       }
     }
   }
 
-  if (current) {
+  for (const current of currentByInstrument.values()) {
     trades.push(finalizeTrade(current, null));
   }
 
@@ -70,6 +74,10 @@ function compareFills(left: CanonicalFill, right: CanonicalFill) {
 
 function signedQuantity(fill: CanonicalFill) {
   return fill.side === "BUY" ? fill.quantity : -fill.quantity;
+}
+
+function instrumentKey(fill: CanonicalFill) {
+  return `${fill.accountId}:${fill.symbol}:${fill.assetClass}`;
 }
 
 function sameDirection(currentNetQuantity: number, signedFillQuantity: number) {

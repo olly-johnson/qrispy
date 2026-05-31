@@ -127,4 +127,42 @@ describe("reconstructTrades", () => {
       realizedPnl: 20,
     });
   });
+
+  it("does not close an open trade with fills from a different symbol", () => {
+    const trades = reconstructTrades([
+      fill({
+        id: "fill-1",
+        side: "BUY",
+        quantity: 10,
+        price: 100,
+        executedAt: "2026-05-01T13:33:00.000Z",
+        symbol: "DOCN",
+      }),
+      fill({
+        id: "fill-2",
+        side: "SELL",
+        quantity: 10,
+        price: 20,
+        executedAt: "2026-05-02T13:33:00.000Z",
+        symbol: "ZSL",
+      }),
+    ]);
+
+    expect(trades).toHaveLength(2);
+    expect(trades).toEqual([
+      expect.objectContaining({
+        symbol: "DOCN",
+        status: "OPEN",
+        closedAt: null,
+        realizedPnl: null,
+      }),
+      expect.objectContaining({
+        symbol: "ZSL",
+        direction: "SHORT",
+        status: "OPEN",
+        closedAt: null,
+        realizedPnl: null,
+      }),
+    ]);
+  });
 });

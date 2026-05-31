@@ -11,7 +11,7 @@ export type TradeZeroSyncRequestedEvent = {
   };
 };
 
-const BACKFILL_START_DATE = "2026-01-01";
+const BACKFILL_START_DATE = "2025-12-01";
 
 export function buildTradeZeroSyncEvent(input: {
   userId: string;
@@ -21,10 +21,11 @@ export function buildTradeZeroSyncEvent(input: {
   const now = input.now ?? new Date();
   const toDate = now.toISOString().slice(0, 10);
   const idempotencyKey = `tradezero-sync:${input.userId}:${input.requestedBy}:${toDate}`;
+  const eventId = `${idempotencyKey}:${now.toISOString()}`;
 
   return {
     name: "tradezero/sync.requested",
-    id: idempotencyKey,
+    id: eventId,
     data: {
       user_id: input.userId,
       requested_by: input.requestedBy,
