@@ -7,6 +7,7 @@ import { formatDateTime, formatMoney } from "@/components/format";
 import { TradeChartPanel } from "@/components/trade-chart-panel";
 import { requireUser } from "@/lib/auth/session";
 import { getTradeDetail } from "@/lib/app-data";
+import { tradeHeadlinePnlValue } from "@/lib/trades/display";
 
 export const dynamic = "force-dynamic";
 
@@ -33,6 +34,7 @@ export default async function TradeDetailPage({
     trade.realizedPnl != null && trade.entryQuantity
       ? trade.realizedPnl / trade.entryQuantity
       : null;
+  const headlinePnl = tradeHeadlinePnlValue(trade);
 
   return (
     <AppShell user={user}>
@@ -53,8 +55,8 @@ export default async function TradeDetailPage({
             {trade.direction} - {trade.status}
           </p>
         </div>
-        <div className="text-right font-mono text-2xl text-emerald-300">
-          {formatMoney(trade.realizedPnl)}
+        <div className={`text-right font-mono text-2xl ${pnlClass(headlinePnl)}`}>
+          {formatMoney(headlinePnl)}
         </div>
       </div>
 
@@ -143,6 +145,14 @@ function Detail({ label, value }: { label: string; value: string }) {
       <div className="mt-3 font-mono text-sm text-zinc-100">{value}</div>
     </div>
   );
+}
+
+function pnlClass(value: number | null) {
+  if (value == null) {
+    return "text-zinc-300";
+  }
+
+  return value >= 0 ? "text-emerald-300" : "text-rose-300";
 }
 
 function formatQuantity(value: number | null | undefined) {
