@@ -15,10 +15,14 @@ import {
   type Time,
 } from "lightweight-charts";
 
+import { updateTradeStopLoss } from "@/app/actions";
+import { formatMoney } from "@/components/format";
+import type { PositionStopGroup } from "@/lib/app-data";
 import type { TradeCharts, TradeChartDataset } from "@/lib/market-data/trade-charts";
 
 const UP_COLOR = "#34d399";
 const DOWN_COLOR = "#fb7185";
+const STOP_LINE_COLOR = "#f97316";
 export const CHART_FONT_SIZE = 14;
 export const MARKER_SIZE = 1.8;
 export const PRICE_LINE_DISABLED_OPTIONS = {
@@ -29,7 +33,13 @@ export const MARKER_OPTIONS = {
   zOrder: "top",
 } satisfies Partial<SeriesMarkersOptions>;
 
-export function TradeChartPanel({ charts }: { charts?: TradeCharts }) {
+export function TradeChartPanel({
+  charts,
+  stopGroups = [],
+}: {
+  charts?: TradeCharts;
+  stopGroups?: PositionStopGroup[];
+}) {
   const availableCharts = charts?.charts ?? [];
   const [activeId, setActiveId] = useState(availableCharts[0]?.id ?? "daily");
   const activeChart =
@@ -89,17 +99,75 @@ export function TradeChartPanel({ charts }: { charts?: TradeCharts }) {
             </div>
           ))}
         </div>
-        <LightweightTradeChart key={activeChart.id} chart={activeChart} />
+        <StopLossControls stopGroups={stopGroups} />
+        <LightweightTradeChart
+          key={activeChart.id}
+          chart={activeChart}
+          stopGroups={stopGroups}
+        />
       </div>
     </section>
   );
 }
 
-function LightweightTradeChart({ chart }: { chart: TradeChartDataset }) {
+function StopLossControls({ stopGroups }: { stopGroups: PositionStopGroup[] }) {
+  if (stopGroups.length === 0) {
+    return null;
+  }
+
+  return (
+    <div className="mb-3 grid gap-2 border-y border-white/10 py-3">
+      {stopGroups.map((group) => (
+        <form
+          action={updateTradeStopLoss.bind(null, group.id)}
+          className="flex flex-wrap items-center gap-3 text-xs"
+          key={group.id}
+        >
+          <span className="flex items-center gap-2 font-mono text-zinc-300">
+            <span
+              aria-hidden="true"
+              className="h-0.5 w-5"
+              style={{ backgroundColor: STOP_LINE_COLOR }}
+            />
+            {group.entryDate} stop
+          </span>
+          <input
+            aria-label={`${group.entryDate} stop loss`}
+            className="h-8 w-28 rounded-md border border-white/10 bg-black/30 px-2 text-right font-mono text-sm text-zinc-100 outline-none focus:border-cyan-300"
+            defaultValue={group.stopLossPrice ?? ""}
+            inputMode="decimal"
+            min="0"
+            name="stopLoss"
+            required
+            step="0.0001"
+            type="number"
+          />
+          <span className="font-mono text-zinc-400">
+            {formatMoney(group.stopUnrealizedPnl)}
+          </span>
+          <button
+            className="h-8 rounded-md bg-cyan-300 px-3 text-xs font-semibold text-zinc-950 hover:bg-cyan-200"
+            type="submit"
+          >
+            Save
+          </button>
+        </form>
+      ))}
+    </div>
+  );
+}
+
+function LightweightTradeChart({
+  chart,
+  stopGroups,
+}: {
+  chart: TradeChartDataset;
+  stopGroups: PositionStopGroup[];
+}) {
   const containerRef = useRef<HTMLDivElement>(null);
   const chartRef = useRef<IChartApi | null>(null);
 
-  const prepared = useMemo(() => prepareChartData(chart), [chart]);
+  const prepared = useMemo(() => prepareChartData(chart, stopGroups), [chart, stopGroups]);
 
   useEffect(() => {
     const container = containerRef.current;
@@ -183,7 +251,10 @@ function LightweightTradeChart({ chart }: { chart: TradeChartDataset }) {
   return <div ref={containerRef} className="h-[520px] w-full" />;
 }
 
-export function prepareChartData(chart: TradeChartDataset) {
+export function prepareChartData(
+  chart: TradeChartDataset,
+  stopGroups: PositionStopGroup[] = [],
+) {
   return {
     candles: chart.bars.map((bar) => ({
       time: chartTime(bar.barStartAt, chart.timeframe),
@@ -197,13 +268,16 @@ export function prepareChartData(chart: TradeChartDataset) {
       value: bar.volume,
       color: bar.close >= bar.open ? "rgba(52, 211, 153, 0.35)" : "rgba(251, 113, 133, 0.35)",
     })),
-    overlays: chart.overlays.map((overlay) => ({
-      ...overlay,
-      points: overlay.points.map((point) => ({
-        time: chartTime(point.time, chart.timeframe),
-        value: point.value,
+    overlays: [
+      ...chart.overlays.map((overlay) => ({
+        ...overlay,
+        points: overlay.points.map((point) => ({
+          time: chartTime(point.time, chart.timeframe),
+          value: point.value,
+        })),
       })),
-    })),
+      ...stopOverlays(chart, stopGroups),
+    ],
     markers: chart.markers.map(
       (marker): SeriesMarker<Time> => ({
         time: chartTime(marker.time, chart.timeframe),
@@ -215,6 +289,37 @@ export function prepareChartData(chart: TradeChartDataset) {
       }),
     ),
   };
+}
+
+function stopOverlays(chart: TradeChartDataset, stopGroups: PositionStopGroup[]) {
+  if (chart.bars.length === 0) {
+    return [];
+  }
+
+  const firstBar = chart.bars[0];
+  const lastBar = chart.bars.at(-1);
+
+  if (!firstBar || !lastBar) {
+    return [];
+  }
+
+  return stopGroups
+    .filter((group) => group.stopLossPrice != null)
+    .map((group) => ({
+      id: `stop-${group.id}`,
+      label: `Stop ${group.entryDate}`,
+      color: STOP_LINE_COLOR,
+      points: [
+        {
+          time: chartTime(firstBar.barStartAt, chart.timeframe),
+          value: group.stopLossPrice as number,
+        },
+        {
+          time: chartTime(lastBar.barStartAt, chart.timeframe),
+          value: group.stopLossPrice as number,
+        },
+      ],
+    }));
 }
 
 function formatMarkerQuantity(value: number) {

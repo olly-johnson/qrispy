@@ -54,6 +54,45 @@ describe("prepareChartData", () => {
       }),
     ]);
   });
+
+  it("adds stop-loss overlays across the visible chart window", () => {
+    const prepared = prepareChartData(
+      {
+        id: "daily",
+        label: "Daily",
+        timeframe: "1d",
+        bars: [
+          bar("2026-05-01T00:00:00.000Z", 100),
+          bar("2026-05-02T00:00:00.000Z", 102),
+        ],
+        overlays: [],
+        markers: [],
+      } satisfies TradeChartDataset,
+      [
+        {
+          id: "group-1",
+          tradeId: "trade-1",
+          entryDate: "2026-05-01",
+          direction: "LONG",
+          quantity: 4,
+          avgEntryPrice: 102,
+          stopLossPrice: 98.25,
+          stopUnrealizedPnl: -15,
+        },
+      ],
+    );
+
+    expect(prepared.overlays).toContainEqual(
+      expect.objectContaining({
+        id: "stop-group-1",
+        color: "#f97316",
+        points: [
+          { time: "2026-05-01", value: 98.25 },
+          { time: "2026-05-02", value: 98.25 },
+        ],
+      }),
+    );
+  });
 });
 
 describe("PRICE_LINE_DISABLED_OPTIONS", () => {
@@ -77,3 +116,19 @@ describe("marker label visibility", () => {
     expect(CHART_FONT_SIZE).toBe(14);
   });
 });
+
+function bar(barStartAt: string, close: number) {
+  return {
+    provider: "massive",
+    symbol: "DOCN",
+    timeframe: "1d",
+    barStartAt,
+    open: close - 1,
+    high: close + 1,
+    low: close - 2,
+    close,
+    volume: 1000,
+    adjusted: false,
+    rawPayload: {},
+  };
+}

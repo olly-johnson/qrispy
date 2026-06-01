@@ -21,6 +21,7 @@ export type DashboardPosition = {
 };
 
 export type PositionStopGroup = {
+  id: string;
   tradeId: string;
   entryDate: string;
   direction: string;
@@ -62,6 +63,7 @@ export type TradeDetailFill = {
 
 export type TradeDetail = DashboardTrade & {
   fills: TradeDetailFill[];
+  stopGroups: PositionStopGroup[];
   charts?: TradeCharts;
 };
 
@@ -141,9 +143,25 @@ type TradeDetailClient = {
       };
     };
   };
+  from(table: "trade_stop_groups"): {
+    select(columns: "*"): {
+      eq(column: "user_id", value: string): {
+        in(column: "trade_id", values: string[]): {
+          order(
+            column: "entry_date",
+            options: { ascending: boolean },
+          ): Promise<{
+            data: Record<string, unknown>[] | null;
+            error: unknown;
+          }>;
+        };
+      };
+    };
+  };
 };
 
 type OpenTradeStopRow = OpenTradeStopInput & {
+  stopGroupId?: string;
   tradeId: string;
   openedAt: string;
   avgEntryPrice: number | null;
@@ -335,9 +353,21 @@ export async function getTradeDetail(
     });
   }
 
+  const stopGroups =
+    String(data.status) === "OPEN"
+      ? (
+          await loadStopGroupRows({
+            client: supabase,
+            userId,
+            tradeIds: [tradeId],
+          })
+        ).map(mapPersistedStopGroupForPosition)
+      : [];
+
   const trade = {
     ...mapTrade(data),
     fills,
+    stopGroups,
   };
 
   const marketDataProvider =
@@ -479,6 +509,7 @@ export function attachPositionStopGroups(
       )
       .sort((left, right) => left.openedAt.localeCompare(right.openedAt))
       .map((trade) => ({
+        id: trade.stopGroupId ?? trade.tradeId,
         tradeId: trade.tradeId,
         entryDate: trade.openedAt.slice(0, 10),
         direction: trade.direction,
@@ -525,7 +556,8 @@ function mapOpenTradeStop(row: Record<string, unknown>): OpenTradeStopRow {
 
 function mapPersistedStopGroup(row: Record<string, unknown>): OpenTradeStopRow {
   return {
-    tradeId: String(row.id),
+    stopGroupId: String(row.id),
+    tradeId: String(row.trade_id),
     accountId: String(row.account_id ?? ""),
     symbol: String(row.symbol),
     direction: String(row.direction),
@@ -533,6 +565,23 @@ function mapPersistedStopGroup(row: Record<string, unknown>): OpenTradeStopRow {
     quantity: numberOrNull(row.quantity),
     avgEntryPrice: numberOrNull(row.avg_entry_price),
     stopLossPrice: numberOrNull(row.stop_loss_price),
+  };
+}
+
+function mapPersistedStopGroupForPosition(
+  row: Record<string, unknown>,
+): PositionStopGroup {
+  const stopGroup = mapPersistedStopGroup(row);
+
+  return {
+    id: stopGroup.stopGroupId ?? stopGroup.tradeId,
+    tradeId: stopGroup.tradeId,
+    entryDate: stopGroup.openedAt.slice(0, 10),
+    direction: stopGroup.direction,
+    quantity: stopGroup.quantity,
+    avgEntryPrice: stopGroup.avgEntryPrice,
+    stopLossPrice: stopGroup.stopLossPrice,
+    stopUnrealizedPnl: stopUnrealizedPnl(stopGroup),
   };
 }
 

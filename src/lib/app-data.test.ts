@@ -98,6 +98,7 @@ describe("attachPositionStopGroups", () => {
     expect(
       attachPositionStopGroups(positions, [
         {
+          stopGroupId: "group-1",
           tradeId: "trade-1",
           accountId: "account-1",
           symbol: "DOCN",
@@ -134,6 +135,7 @@ describe("attachPositionStopGroups", () => {
         stopUnrealizedPnl: -30,
         stopGroups: [
           {
+            id: "group-1",
             tradeId: "trade-1",
             entryDate: "2026-03-12",
             quantity: 10,
@@ -293,6 +295,93 @@ describe("getTradeHistory", () => {
 });
 
 describe("getTradeDetail", () => {
+  it("loads editable stop groups for open trades", async () => {
+    const tradeSecondEq = vi.fn(() => ({
+      maybeSingle: vi.fn().mockResolvedValue({
+        data: {
+          id: "trade-1",
+          account_id: "account-1",
+          symbol: "DOCN",
+          direction: "LONG",
+          status: "OPEN",
+          opened_at: "2026-05-01T14:30:00.000Z",
+          closed_at: null,
+          entry_quantity: 10,
+          max_abs_quantity: 10,
+          avg_entry_price: 102,
+          avg_exit_price: null,
+          realized_pnl: null,
+          total_fees: 2,
+        },
+        error: null,
+      }),
+    }));
+    const tradeFirstEq = vi.fn(() => ({ eq: tradeSecondEq }));
+    const tradeSelect = vi.fn(() => ({ eq: tradeFirstEq }));
+
+    const tradeFillsOrder = vi.fn().mockResolvedValue({ data: [], error: null });
+    const tradeFillsSecondEq = vi.fn(() => ({ order: tradeFillsOrder }));
+    const tradeFillsFirstEq = vi.fn(() => ({ eq: tradeFillsSecondEq }));
+    const tradeFillsSelect = vi.fn(() => ({ eq: tradeFillsFirstEq }));
+
+    const stopGroupsOrder = vi.fn().mockResolvedValue({
+      data: [
+        {
+          id: "group-1",
+          trade_id: "trade-1",
+          account_id: "account-1",
+          symbol: "DOCN",
+          direction: "LONG",
+          entry_date: "2026-05-01",
+          quantity: 4,
+          avg_entry_price: 102,
+          stop_loss_price: 98.25,
+        },
+      ],
+      error: null,
+    });
+    const stopGroupsTradeIn = vi.fn(() => ({ order: stopGroupsOrder }));
+    const stopGroupsUserEq = vi.fn(() => ({ in: stopGroupsTradeIn }));
+    const stopGroupsSelect = vi.fn(() => ({ eq: stopGroupsUserEq }));
+
+    const from = vi.fn((table: string) => {
+      if (table === "trades") {
+        return { select: tradeSelect };
+      }
+      if (table === "trade_fills") {
+        return { select: tradeFillsSelect };
+      }
+      if (table === "trade_stop_groups") {
+        return { select: stopGroupsSelect };
+      }
+
+      throw new Error(`Unexpected table ${table}`);
+    });
+
+    await expect(
+      getTradeDetail("user-1", "trade-1", {
+        client: { from },
+        marketDataProvider: null,
+      }),
+    ).resolves.toMatchObject({
+      id: "trade-1",
+      stopGroups: [
+        {
+          id: "group-1",
+          tradeId: "trade-1",
+          entryDate: "2026-05-01",
+          quantity: 4,
+          stopLossPrice: 98.25,
+          stopUnrealizedPnl: -15,
+        },
+      ],
+    });
+
+    expect(stopGroupsSelect).toHaveBeenCalledWith("*");
+    expect(stopGroupsUserEq).toHaveBeenCalledWith("user_id", "user-1");
+    expect(stopGroupsTradeIn).toHaveBeenCalledWith("trade_id", ["trade-1"]);
+  });
+
   it("loads the trade summary with allocated fills for analysis", async () => {
     const tradeSecondEq = vi.fn(() => ({
       maybeSingle: vi.fn().mockResolvedValue({

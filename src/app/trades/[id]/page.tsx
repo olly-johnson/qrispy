@@ -70,7 +70,7 @@ export default async function TradeDetailPage({
         <Detail label="Fees" value={formatMoney(trade.totalFees)} />
       </section>
 
-      <TradeChartPanel charts={trade.charts} />
+      <TradeChartPanel charts={trade.charts} stopGroups={trade.stopGroups} />
 
       <section className="mt-8">
         <h2 className="text-lg font-semibold">Fill Path</h2>

@@ -4,3 +4,11 @@ export function dashboardPositionUnrealizedValue(position: {
 }) {
   return position.stopUnrealizedPnl;
 }
+
+export function dashboardPositionTradeHref(position: {
+  stopGroups: Array<{ tradeId: string | null | undefined }>;
+}) {
+  const tradeId = position.stopGroups.find((group) => group.tradeId)?.tradeId;
+
+  return tradeId ? `/trades/${tradeId}` : null;
+}

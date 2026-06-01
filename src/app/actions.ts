@@ -42,7 +42,7 @@ export async function updateTradeStopLoss(stopGroupId: string, formData: FormDat
 
   const { data, error } = await supabase
     .from("trade_stop_groups")
-    .select("id,direction,avg_entry_price,quantity")
+    .select("id,trade_id,direction,avg_entry_price,quantity")
     .eq("user_id", user.id)
     .eq("id", stopGroupId)
     .maybeSingle();
@@ -86,6 +86,7 @@ export async function updateTradeStopLoss(stopGroupId: string, formData: FormDat
 
   revalidatePath("/positions");
   revalidatePath("/dashboard");
+  revalidatePath(`/trades/${String(data.trade_id)}`);
 }
 
 function parsePositiveNumber(value: FormDataEntryValue | null) {

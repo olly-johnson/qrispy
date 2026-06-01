@@ -113,7 +113,7 @@ function StopGroupsTable({
         </thead>
         <tbody className="divide-y divide-white/10">
           {position.stopGroups.map((group) => (
-            <tr key={group.tradeId}>
+            <tr key={group.id}>
               <td className="px-3 py-2 font-mono text-zinc-300">
                 {formatEntryDate(group.entryDate)}
               </td>
@@ -128,7 +128,7 @@ function StopGroupsTable({
               </td>
               <td className="px-3 py-2">
                 <form
-                  action={updateTradeStopLoss.bind(null, group.tradeId)}
+                  action={updateTradeStopLoss.bind(null, group.id)}
                   className="ml-auto flex max-w-44 items-center justify-end gap-2"
                 >
                   <input

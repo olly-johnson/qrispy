@@ -35,10 +35,11 @@ describe("updateTradeStopLoss", () => {
     vi.mocked(requireUser).mockResolvedValue({ id: "user-1", email: "test@example.com" });
 
     const maybeSingle = vi.fn().mockResolvedValue({
-      data: {
-        id: "group-1",
-        user_id: "user-1",
-        direction: "LONG",
+        data: {
+          id: "group-1",
+          trade_id: "trade-1",
+          user_id: "user-1",
+          direction: "LONG",
         avg_entry_price: 90,
         quantity: 10,
       },
@@ -60,7 +61,7 @@ describe("updateTradeStopLoss", () => {
     await updateTradeStopLoss("group-1", formData);
 
     expect(from).toHaveBeenCalledWith("trade_stop_groups");
-    expect(select).toHaveBeenCalledWith("id,direction,avg_entry_price,quantity");
+    expect(select).toHaveBeenCalledWith("id,trade_id,direction,avg_entry_price,quantity");
     expect(selectFirstEq).toHaveBeenCalledWith("user_id", "user-1");
     expect(selectSecondEq).toHaveBeenCalledWith("id", "group-1");
     expect(update).toHaveBeenCalledWith(
@@ -74,5 +75,6 @@ describe("updateTradeStopLoss", () => {
     expect(updateSecondEq).toHaveBeenCalledWith("id", "group-1");
     expect(revalidatePath).toHaveBeenCalledWith("/positions");
     expect(revalidatePath).toHaveBeenCalledWith("/dashboard");
+    expect(revalidatePath).toHaveBeenCalledWith("/trades/trade-1");
   });
 });
