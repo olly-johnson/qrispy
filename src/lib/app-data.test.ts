@@ -201,6 +201,108 @@ describe("attachPositionStopGroups", () => {
       },
     ]);
   });
+
+  it("caps stop groups to the latest broker position quantity", () => {
+    const positions = mapLatestPositions([
+      {
+        id: "latest-fcel",
+        account_id: "account-1",
+        snapshot_at: "2026-06-01T13:54:40Z",
+        symbol: "FCEL",
+        quantity: 7,
+        average_price: 14.47,
+        market_value: 145.95,
+        unrealized_pnl: 44.66,
+      },
+    ]);
+
+    expect(
+      attachPositionStopGroups(positions, [
+        {
+          stopGroupId: "group-1",
+          tradeId: "trade-1",
+          accountId: "account-1",
+          symbol: "FCEL",
+          direction: "LONG",
+          openedAt: "2026-05-11T13:51:49.000Z",
+          quantity: 14,
+          avgEntryPrice: 14.47,
+          stopLossPrice: 15.99,
+        },
+      ]),
+    ).toMatchObject([
+      {
+        symbol: "FCEL",
+        stopUnrealizedPnl: 10.64,
+        stopGroups: [
+          {
+            id: "group-1",
+            quantity: 7,
+            stopUnrealizedPnl: 10.64,
+          },
+        ],
+      },
+    ]);
+  });
+
+  it("allocates a live position across multiple stop groups without over-counting", () => {
+    const positions = mapLatestPositions([
+      {
+        id: "latest-docn",
+        account_id: "account-1",
+        snapshot_at: "2026-06-01T13:54:40Z",
+        symbol: "DOCN",
+        quantity: 12,
+        average_price: 100,
+        market_value: 1200,
+        unrealized_pnl: 0,
+      },
+    ]);
+
+    expect(
+      attachPositionStopGroups(positions, [
+        {
+          stopGroupId: "older",
+          tradeId: "trade-1",
+          accountId: "account-1",
+          symbol: "DOCN",
+          direction: "LONG",
+          openedAt: "2026-05-01T13:51:49.000Z",
+          quantity: 10,
+          avgEntryPrice: 100,
+          stopLossPrice: 90,
+        },
+        {
+          stopGroupId: "newer",
+          tradeId: "trade-2",
+          accountId: "account-1",
+          symbol: "DOCN",
+          direction: "LONG",
+          openedAt: "2026-05-29T13:51:49.000Z",
+          quantity: 10,
+          avgEntryPrice: 100,
+          stopLossPrice: 95,
+        },
+      ]),
+    ).toMatchObject([
+      {
+        symbol: "DOCN",
+        stopUnrealizedPnl: -110,
+        stopGroups: [
+          {
+            id: "older",
+            quantity: 10,
+            stopUnrealizedPnl: -100,
+          },
+          {
+            id: "newer",
+            quantity: 2,
+            stopUnrealizedPnl: -10,
+          },
+        ],
+      },
+    ]);
+  });
 });
 
 describe("loadStopGroupRows", () => {

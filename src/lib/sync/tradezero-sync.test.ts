@@ -390,6 +390,93 @@ describe("replaceReconstructedTrades", () => {
     );
   });
 
+  it("caps persisted stop groups to the live broker position quantity", async () => {
+    const fillsOrder = vi.fn().mockResolvedValue({
+      data: [
+        storedFill({
+          id: "entry",
+          side: "BUY",
+          quantity: 20,
+          price: 14.47,
+          executedAt: "2026-05-11T13:51:49.000Z",
+          fees: 1,
+          symbol: "FCEL",
+        }),
+        storedFill({
+          id: "known-exit",
+          side: "SELL",
+          quantity: 6,
+          price: 17.8,
+          executedAt: "2026-05-13T12:58:55.000Z",
+          fees: 1,
+          symbol: "FCEL",
+        }),
+      ],
+      error: null,
+    });
+    const fillsLte = vi.fn(() => ({ order: fillsOrder }));
+    const fillsGte = vi.fn(() => ({ lte: fillsLte }));
+    const fillsIn = vi.fn(() => ({ gte: fillsGte }));
+    const fillsEq = vi.fn(() => ({ in: fillsIn }));
+    const fillsSelect = vi.fn(() => ({ eq: fillsEq }));
+
+    const deleteLt = vi.fn().mockResolvedValue({ error: null });
+    const deleteGte = vi.fn(() => ({ lt: deleteLt }));
+    const deleteIn = vi.fn(() => ({ gte: deleteGte }));
+    const deleteEq = vi.fn(() => ({ in: deleteIn }));
+    const deleteTrades = vi.fn(() => ({ eq: deleteEq }));
+    const selectUpsertedTrades = vi.fn().mockResolvedValue({
+      data: [{ id: "trade-fcel", reconstruction_key: "account-1:FCEL:entry" }],
+      error: null,
+    });
+    const upsert = vi.fn(() => ({ select: selectUpsertedTrades }));
+    const insertTradeFills = vi.fn().mockResolvedValue({ error: null });
+    const stopGroupsTable = emptyStopGroupsTable();
+    const from = vi.fn((table: string) => {
+      if (table === "fills") {
+        return { select: fillsSelect };
+      }
+      if (table === "trade_fills") {
+        return { insert: insertTradeFills };
+      }
+      if (table === "trade_stop_groups") {
+        return stopGroupsTable;
+      }
+
+      return {
+        delete: deleteTrades,
+        upsert,
+      };
+    });
+
+    await replaceReconstructedTrades({
+      client: { from },
+      marketDataProvider: null,
+      userId: "user-1",
+      accountIds: ["account-1"],
+      fromDate: "2026-01-01",
+      toDate: "2026-05-28",
+      positionSnapshots: [
+        {
+          accountId: "account-1",
+          symbol: "FCEL",
+          quantity: 7,
+        },
+      ],
+    });
+
+    expect(stopGroupsTable.upsert).toHaveBeenCalledWith(
+      [
+        expect.objectContaining({
+          entry_date: "2026-05-11",
+          quantity: 7,
+          avg_entry_price: 14.47,
+        }),
+      ],
+      { onConflict: "user_id,reconstruction_key,entry_date" },
+    );
+  });
+
   it("continues rebuilding trades when stop group migration is not applied yet", async () => {
     const fillsOrder = vi.fn().mockResolvedValue({
       data: [

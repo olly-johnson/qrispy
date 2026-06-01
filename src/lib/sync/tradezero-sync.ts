@@ -109,6 +109,12 @@ type RebuildTradeClient = {
   };
 };
 
+type CurrentBrokerPosition = {
+  accountId: string;
+  symbol: string;
+  quantity: number;
+};
+
 const IGNORED_OPEN_DECEMBER_TRADE_SYMBOLS = new Set(["UGL", "AGQ", "ERO", "ROIV"]);
 const IGNORED_DECEMBER_OPEN_START = "2025-12-01T00:00:00.000Z";
 const IGNORED_DECEMBER_OPEN_END = "2026-01-01T00:00:00.000Z";
@@ -149,6 +155,7 @@ export async function runTradeZeroSync(input: SyncInput) {
 
     const normalizedFills: CanonicalFill[] = [];
     const accountIds: string[] = [];
+    const currentPositions: CurrentBrokerPosition[] = [];
 
     for (const accountPayload of accounts) {
       const brokerAccountId = getTradeZeroAccountId(accountPayload);
@@ -178,6 +185,13 @@ export async function runTradeZeroSync(input: SyncInput) {
       const positions = await tradeZero.listPositions(brokerAccountId);
       const positionSnapshots = positions.map((position) =>
         buildTradeZeroPositionSnapshot({ pnl, position }),
+      );
+      currentPositions.push(
+        ...positionSnapshots.map((positionSnapshot) => ({
+          accountId,
+          symbol: positionSnapshot.symbol,
+          quantity: positionSnapshot.quantity,
+        })),
       );
       const portfolioSnapshot = buildTradeZeroPortfolioSnapshot({
         pnl,
@@ -279,6 +293,7 @@ export async function runTradeZeroSync(input: SyncInput) {
       accountIds,
       fromDate: input.fromDate,
       toDate: input.toDate,
+      positionSnapshots: currentPositions,
     });
     await recordTradeZeroSyncSucceeded(input, { client: supabase, id: jobRun?.id });
 
@@ -300,6 +315,7 @@ export async function replaceReconstructedTrades(input: {
   accountIds: string[];
   fromDate: string;
   toDate: string;
+  positionSnapshots?: CurrentBrokerPosition[];
 }) {
   if (input.accountIds.length === 0) {
     return;
@@ -427,6 +443,7 @@ export async function replaceReconstructedTrades(input: {
     marketDataProvider,
     trades,
     fills,
+    positionSnapshots: input.positionSnapshots ?? [],
     tradeIdByReconstructionKey,
     existingStopGroups,
     userId: input.userId,
@@ -474,6 +491,7 @@ async function upsertTradeStopGroups(input: {
   marketDataProvider: MarketDataProvider | null;
   trades: ReturnType<typeof reconstructTrades>;
   fills: CanonicalFill[];
+  positionSnapshots: CurrentBrokerPosition[];
   tradeIdByReconstructionKey: Map<string, string>;
   existingStopGroups: Map<string, number | null>;
   userId: string;
@@ -503,6 +521,7 @@ async function upsertTradeStopGroups(input: {
   const groups = buildOpenEntryStopGroups({
     trades: input.trades,
     fills: input.fills,
+    positionSnapshots: input.positionSnapshots,
     tradeIdByReconstructionKey: input.tradeIdByReconstructionKey,
   });
 
@@ -575,6 +594,7 @@ function isMissingStopGroupsTableError(error: unknown) {
 function buildOpenEntryStopGroups(input: {
   trades: ReturnType<typeof reconstructTrades>;
   fills: CanonicalFill[];
+  positionSnapshots?: CurrentBrokerPosition[];
   tradeIdByReconstructionKey: Map<string, string>;
 }) {
   const fillsById = new Map(input.fills.map((fill) => [fill.id, fill]));
@@ -670,14 +690,67 @@ function buildOpenEntryStopGroups(input: {
     }
   }
 
-  return [...groups.values()]
+  return capGroupsToBrokerPositions(
+    [...groups.values()]
+      .filter((group) => group.quantity > 0.000001)
+      .map((group) => ({
+        ...group,
+        quantity: roundMoney(group.quantity),
+        notional: roundMoney(group.notional),
+        avgEntryPrice: roundMoney(group.notional / group.quantity),
+      })),
+    input.positionSnapshots ?? [],
+  );
+}
+
+function capGroupsToBrokerPositions(
+  groups: Array<{
+    key: string;
+    userId: string;
+    tradeId: string;
+    reconstructionKey: string;
+    accountId: string;
+    symbol: string;
+    direction: string;
+    entryDate: string;
+    quantity: number;
+    notional: number;
+    avgEntryPrice: number;
+  }>,
+  positions: CurrentBrokerPosition[],
+) {
+  if (positions.length === 0) {
+    return groups;
+  }
+
+  const remainingByPosition = new Map(
+    positions.map((position) => [
+      `${position.accountId}:${position.symbol}`,
+      Math.abs(position.quantity),
+    ]),
+  );
+
+  return groups
+    .sort((left, right) => left.entryDate.localeCompare(right.entryDate))
+    .map((group) => {
+      const positionKey = `${group.accountId}:${group.symbol}`;
+      const remainingQuantity = remainingByPosition.get(positionKey);
+
+      if (remainingQuantity == null) {
+        return group;
+      }
+
+      const quantity = Math.min(group.quantity, remainingQuantity);
+      remainingByPosition.set(positionKey, Math.max(remainingQuantity - quantity, 0));
+
+      return {
+        ...group,
+        quantity: roundMoney(quantity),
+        notional: roundMoney(group.avgEntryPrice * quantity),
+      };
+    })
     .filter((group) => group.quantity > 0.000001)
-    .map((group) => ({
-      ...group,
-      quantity: roundMoney(group.quantity),
-      notional: roundMoney(group.notional),
-      avgEntryPrice: roundMoney(group.notional / group.quantity),
-    }));
+    .sort((left, right) => left.key.localeCompare(right.key));
 }
 
 async function getStopDefaultsForEntryGroups(input: {

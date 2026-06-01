@@ -227,16 +227,25 @@ export async function getDashboardData(userId: string) {
       : [];
   const stopGroups = stopGroupRows.map(mapPersistedStopGroup);
   const positionsWithStops = attachPositionStopGroups(positions, stopGroups);
+  const cappedStopGroups = positionsWithStops.flatMap((position) =>
+    position.stopGroups.map((group) => ({
+      accountId: position.accountId,
+      symbol: position.symbol,
+      direction: group.direction,
+      quantity: group.quantity,
+      stopLossPrice: group.stopLossPrice,
+    })),
+  );
   const equityStopInputs =
     stopGroups.length > 0
-      ? stopGroups.map((group) => ({
+      ? cappedStopGroups
+      : openTrades.map((group) => ({
           accountId: group.accountId,
           symbol: group.symbol,
           direction: group.direction,
           quantity: group.quantity,
           stopLossPrice: group.stopLossPrice,
-        }))
-      : openTrades;
+        }));
   const summary = buildPortfolioSummary({
     snapshot: snapshotResult.data
       ? {
@@ -502,12 +511,14 @@ export function attachPositionStopGroups(
   openTrades: OpenTradeStopRow[],
 ) {
   return positions.map((position) => {
-    const stopGroups = openTrades
+    const matchedTrades = openTrades
       .filter(
         (trade) =>
           trade.accountId === position.accountId && trade.symbol === position.symbol,
       )
-      .sort((left, right) => left.openedAt.localeCompare(right.openedAt))
+      .sort((left, right) => left.openedAt.localeCompare(right.openedAt));
+    const cappedTrades = capTradesToPositionQuantity(position, matchedTrades);
+    const stopGroups = cappedTrades
       .map((trade) => ({
         id: trade.stopGroupId ?? trade.tradeId,
         tradeId: trade.tradeId,
@@ -525,6 +536,29 @@ export function attachPositionStopGroups(
       stopUnrealizedPnl: sumStopUnrealizedPnl(stopGroups),
     };
   });
+}
+
+function capTradesToPositionQuantity(
+  position: DashboardPosition,
+  trades: OpenTradeStopRow[],
+) {
+  let remainingQuantity = Math.abs(position.quantity);
+
+  return trades
+    .map((trade) => {
+      if (trade.quantity == null) {
+        return trade;
+      }
+
+      const quantity = Math.min(trade.quantity, remainingQuantity);
+      remainingQuantity = Math.max(remainingQuantity - quantity, 0);
+
+      return {
+        ...trade,
+        quantity: roundShareQuantity(quantity),
+      };
+    })
+    .filter((trade) => trade.quantity == null || trade.quantity > 0.000001);
 }
 
 function mapPosition(row: Record<string, unknown>): DashboardPosition {
@@ -842,4 +876,8 @@ function numberOrNull(value: unknown) {
 
 function roundMoney(value: number) {
   return Math.round((value + Number.EPSILON) * 100) / 100;
+}
+
+function roundShareQuantity(value: number) {
+  return Math.round((value + Number.EPSILON) * 10000) / 10000;
 }
