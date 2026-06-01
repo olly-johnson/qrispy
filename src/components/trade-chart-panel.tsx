@@ -8,7 +8,10 @@ import {
   createSeriesMarkers,
   HistogramSeries,
   LineSeries,
+  LineStyle,
+  type CreatePriceLineOptions,
   type IChartApi,
+  type IPriceLine,
   type ISeriesApi,
   type SeriesMarker,
   type SeriesMarkersOptions,
@@ -20,9 +23,15 @@ import { formatMoney } from "@/components/format";
 import type { PositionStopGroup } from "@/lib/app-data";
 import type { TradeCharts, TradeChartDataset } from "@/lib/market-data/trade-charts";
 
+type StopPriceLineOptions = CreatePriceLineOptions & { id: string };
+
 const UP_COLOR = "#34d399";
 const DOWN_COLOR = "#fb7185";
-const STOP_LINE_COLOR = "#f97316";
+export const STOP_LINE_COLOR = "249, 115, 22";
+export const STOP_LINE_OPACITY = 0.5;
+export const STOP_PRICE_LINE_STYLE = LineStyle.Dashed;
+const STOP_LINE_RGBA = `rgba(${STOP_LINE_COLOR}, ${STOP_LINE_OPACITY})`;
+const STOP_DRAG_HIT_TOLERANCE_PX = 10;
 export const CHART_FONT_SIZE = 14;
 export const MARKER_SIZE = 1.8;
 export const PRICE_LINE_DISABLED_OPTIONS = {
@@ -42,8 +51,31 @@ export function TradeChartPanel({
 }) {
   const availableCharts = charts?.charts ?? [];
   const [activeId, setActiveId] = useState(availableCharts[0]?.id ?? "daily");
+  const [stopPriceValues, setStopPriceValues] = useState(() =>
+    initialStopPriceValues(stopGroups),
+  );
   const activeChart =
     availableCharts.find((chart) => chart.id === activeId) ?? availableCharts[0] ?? null;
+  const editableStopGroups = useMemo(
+    () =>
+      stopGroups.map((group) => {
+        const stopLossPrice = numberFromInput(stopPriceValues[group.id]);
+
+        return {
+          ...group,
+          stopLossPrice,
+          stopUnrealizedPnl: stopUnrealizedPnl({
+            ...group,
+            stopLossPrice,
+          }),
+        };
+      }),
+    [stopGroups, stopPriceValues],
+  );
+
+  const updateStopPriceValue = (id: string, value: string) => {
+    setStopPriceValues((current) => ({ ...current, [id]: value }));
+  };
 
   if (charts?.error) {
     return (
@@ -99,18 +131,31 @@ export function TradeChartPanel({
             </div>
           ))}
         </div>
-        <StopLossControls stopGroups={stopGroups} />
+        <StopLossControls
+          stopGroups={editableStopGroups}
+          stopPriceValues={stopPriceValues}
+          onStopPriceChange={updateStopPriceValue}
+        />
         <LightweightTradeChart
           key={activeChart.id}
           chart={activeChart}
-          stopGroups={stopGroups}
+          stopGroups={editableStopGroups}
+          onStopPriceChange={updateStopPriceValue}
         />
       </div>
     </section>
   );
 }
 
-function StopLossControls({ stopGroups }: { stopGroups: PositionStopGroup[] }) {
+function StopLossControls({
+  onStopPriceChange,
+  stopGroups,
+  stopPriceValues,
+}: {
+  onStopPriceChange: (id: string, value: string) => void;
+  stopGroups: PositionStopGroup[];
+  stopPriceValues: Record<string, string>;
+}) {
   if (stopGroups.length === 0) {
     return null;
   }
@@ -127,20 +172,21 @@ function StopLossControls({ stopGroups }: { stopGroups: PositionStopGroup[] }) {
             <span
               aria-hidden="true"
               className="h-0.5 w-5"
-              style={{ backgroundColor: STOP_LINE_COLOR }}
+              style={{ backgroundColor: STOP_LINE_RGBA }}
             />
             {group.entryDate} stop
           </span>
           <input
             aria-label={`${group.entryDate} stop loss`}
             className="h-8 w-28 rounded-md border border-white/10 bg-black/30 px-2 text-right font-mono text-sm text-zinc-100 outline-none focus:border-cyan-300"
-            defaultValue={group.stopLossPrice ?? ""}
             inputMode="decimal"
             min="0"
             name="stopLoss"
+            onChange={(event) => onStopPriceChange(group.id, event.currentTarget.value)}
             required
             step="0.0001"
             type="number"
+            value={stopPriceValues[group.id] ?? ""}
           />
           <span className="font-mono text-zinc-400">
             {formatMoney(group.stopUnrealizedPnl)}
@@ -159,21 +205,37 @@ function StopLossControls({ stopGroups }: { stopGroups: PositionStopGroup[] }) {
 
 function LightweightTradeChart({
   chart,
+  onStopPriceChange,
   stopGroups,
 }: {
   chart: TradeChartDataset;
+  onStopPriceChange: (id: string, value: string) => void;
   stopGroups: PositionStopGroup[];
 }) {
   const containerRef = useRef<HTMLDivElement>(null);
   const chartRef = useRef<IChartApi | null>(null);
+  const candleSeriesRef = useRef<ISeriesApi<"Candlestick"> | null>(null);
+  const draggingStopIdRef = useRef<string | null>(null);
+  const onStopPriceChangeRef = useRef(onStopPriceChange);
+  const stopGroupsRef = useRef(stopGroups);
+  const stopLineRefs = useRef(new Map<string, IPriceLine>());
 
-  const prepared = useMemo(() => prepareChartData(chart, stopGroups), [chart, stopGroups]);
+  const prepared = useMemo(() => prepareChartData(chart), [chart]);
+
+  useEffect(() => {
+    onStopPriceChangeRef.current = onStopPriceChange;
+  }, [onStopPriceChange]);
+
+  useEffect(() => {
+    stopGroupsRef.current = stopGroups;
+  }, [stopGroups]);
 
   useEffect(() => {
     const container = containerRef.current;
     if (!container) {
       return;
     }
+    const stopLineMap = stopLineRefs.current;
 
     const api = createChart(container, {
       autoSize: true,
@@ -210,6 +272,7 @@ function LightweightTradeChart({
       ...PRICE_LINE_DISABLED_OPTIONS,
     });
     candleSeries.setData(prepared.candles);
+    candleSeriesRef.current = candleSeries;
     createSeriesMarkers(candleSeries, prepared.markers, MARKER_OPTIONS);
 
     const volumeSeries = api.addSeries(HistogramSeries, {
@@ -236,9 +299,120 @@ function LightweightTradeChart({
 
     return () => {
       chartRef.current = null;
+      candleSeriesRef.current = null;
+      stopLineMap.clear();
       api.remove();
     };
   }, [chart.timeframe, prepared]);
+
+  useEffect(() => {
+    const candleSeries = candleSeriesRef.current;
+    if (!candleSeries) {
+      return;
+    }
+
+    const activeStopLines = prepareStopPriceLines(stopGroups);
+    const activeStopIds = new Set(activeStopLines.map((line) => line.id));
+
+    for (const [id, line] of stopLineRefs.current.entries()) {
+      if (!activeStopIds.has(id)) {
+        candleSeries.removePriceLine(line);
+        stopLineRefs.current.delete(id);
+      }
+    }
+
+    for (const stopLine of activeStopLines) {
+      const existingLine = stopLineRefs.current.get(stopLine.id);
+      if (existingLine) {
+        existingLine.applyOptions(stopLine);
+      } else {
+        stopLineRefs.current.set(stopLine.id, candleSeries.createPriceLine(stopLine));
+      }
+    }
+  }, [stopGroups]);
+
+  useEffect(() => {
+    const container = containerRef.current;
+    const candleSeries = candleSeriesRef.current;
+    if (!container || !candleSeries) {
+      return;
+    }
+
+    const stopAtPointer = (clientY: number) => {
+      const y = clientY - container.getBoundingClientRect().top;
+
+      return stopGroupsRef.current
+        .filter((group) => group.stopLossPrice != null)
+        .map((group) => ({
+          group,
+          distance: Math.abs((candleSeries.priceToCoordinate(group.stopLossPrice as number) ?? -9999) - y),
+        }))
+        .sort((left, right) => left.distance - right.distance)[0];
+    };
+
+    const handlePointerDown = (event: PointerEvent) => {
+      const candidate = stopAtPointer(event.clientY);
+
+      if (!candidate || candidate.distance > STOP_DRAG_HIT_TOLERANCE_PX) {
+        return;
+      }
+
+      draggingStopIdRef.current = candidate.group.id;
+      container.setPointerCapture(event.pointerId);
+      container.style.cursor = "ns-resize";
+      event.preventDefault();
+    };
+
+    const handlePointerMove = (event: PointerEvent) => {
+      const y = event.clientY - container.getBoundingClientRect().top;
+      const draggingStopId = draggingStopIdRef.current;
+
+      if (!draggingStopId) {
+        const candidate = stopAtPointer(event.clientY);
+        container.style.cursor =
+          candidate && candidate.distance <= STOP_DRAG_HIT_TOLERANCE_PX
+            ? "ns-resize"
+            : "";
+        return;
+      }
+
+      const price = candleSeries.coordinateToPrice(y);
+      if (price == null) {
+        return;
+      }
+
+      const roundedPrice = roundStopPrice(price);
+      stopLineRefs.current.get(draggingStopId)?.applyOptions({ price: roundedPrice });
+      onStopPriceChangeRef.current(draggingStopId, formatStopInputValue(roundedPrice));
+      event.preventDefault();
+    };
+
+    const stopDragging = (event: PointerEvent) => {
+      if (!draggingStopIdRef.current) {
+        return;
+      }
+
+      draggingStopIdRef.current = null;
+      container.style.cursor = "";
+      if (container.hasPointerCapture(event.pointerId)) {
+        container.releasePointerCapture(event.pointerId);
+      }
+    };
+
+    container.addEventListener("pointerdown", handlePointerDown);
+    container.addEventListener("pointermove", handlePointerMove);
+    container.addEventListener("pointerup", stopDragging);
+    container.addEventListener("pointercancel", stopDragging);
+    container.addEventListener("pointerleave", handlePointerMove);
+
+    return () => {
+      container.removeEventListener("pointerdown", handlePointerDown);
+      container.removeEventListener("pointermove", handlePointerMove);
+      container.removeEventListener("pointerup", stopDragging);
+      container.removeEventListener("pointercancel", stopDragging);
+      container.removeEventListener("pointerleave", handlePointerMove);
+    };
+  }, []);
 
   if (chart.bars.length === 0) {
     return (
@@ -251,10 +425,7 @@ function LightweightTradeChart({
   return <div ref={containerRef} className="h-[520px] w-full" />;
 }
 
-export function prepareChartData(
-  chart: TradeChartDataset,
-  stopGroups: PositionStopGroup[] = [],
-) {
+export function prepareChartData(chart: TradeChartDataset) {
   return {
     candles: chart.bars.map((bar) => ({
       time: chartTime(bar.barStartAt, chart.timeframe),
@@ -276,7 +447,6 @@ export function prepareChartData(
           value: point.value,
         })),
       })),
-      ...stopOverlays(chart, stopGroups),
     ],
     markers: chart.markers.map(
       (marker): SeriesMarker<Time> => ({
@@ -291,39 +461,73 @@ export function prepareChartData(
   };
 }
 
-function stopOverlays(chart: TradeChartDataset, stopGroups: PositionStopGroup[]) {
-  if (chart.bars.length === 0) {
-    return [];
-  }
-
-  const firstBar = chart.bars[0];
-  const lastBar = chart.bars.at(-1);
-
-  if (!firstBar || !lastBar) {
-    return [];
-  }
-
+export function prepareStopPriceLines(
+  stopGroups: PositionStopGroup[],
+): StopPriceLineOptions[] {
   return stopGroups
     .filter((group) => group.stopLossPrice != null)
     .map((group) => ({
-      id: `stop-${group.id}`,
-      label: `Stop ${group.entryDate}`,
-      color: STOP_LINE_COLOR,
-      points: [
-        {
-          time: chartTime(firstBar.barStartAt, chart.timeframe),
-          value: group.stopLossPrice as number,
-        },
-        {
-          time: chartTime(lastBar.barStartAt, chart.timeframe),
-          value: group.stopLossPrice as number,
-        },
-      ],
+      id: group.id,
+      price: group.stopLossPrice as number,
+      color: STOP_LINE_RGBA,
+      lineWidth: 2,
+      lineStyle: STOP_PRICE_LINE_STYLE,
+      lineVisible: true,
+      axisLabelVisible: true,
+      axisLabelColor: STOP_LINE_RGBA,
+      axisLabelTextColor: "#ffffff",
+      title: `Stop ${formatStopInputValue(group.stopLossPrice as number)}`,
     }));
 }
 
 function formatMarkerQuantity(value: number) {
   return new Intl.NumberFormat("en-US", { maximumFractionDigits: 4 }).format(value);
+}
+
+function initialStopPriceValues(stopGroups: PositionStopGroup[]) {
+  return Object.fromEntries(
+    stopGroups.map((group) => [
+      group.id,
+      group.stopLossPrice == null ? "" : formatStopInputValue(group.stopLossPrice),
+    ]),
+  );
+}
+
+function numberFromInput(value: string | undefined) {
+  if (!value?.trim()) {
+    return null;
+  }
+
+  const parsed = Number(value);
+  return Number.isFinite(parsed) ? parsed : null;
+}
+
+function stopUnrealizedPnl(group: PositionStopGroup) {
+  if (
+    group.quantity == null ||
+    group.avgEntryPrice == null ||
+    group.stopLossPrice == null
+  ) {
+    return null;
+  }
+
+  const value =
+    group.direction === "LONG"
+      ? (group.stopLossPrice - group.avgEntryPrice) * group.quantity
+      : (group.avgEntryPrice - group.stopLossPrice) * group.quantity;
+
+  return roundStopPrice(value);
+}
+
+function roundStopPrice(value: number) {
+  return Math.round((value + Number.EPSILON) * 10000) / 10000;
+}
+
+function formatStopInputValue(value: number) {
+  return new Intl.NumberFormat("en-US", {
+    maximumFractionDigits: 4,
+    useGrouping: false,
+  }).format(value);
 }
 
 function chartTime(value: string, timeframe: TradeChartDataset["timeframe"]): Time {

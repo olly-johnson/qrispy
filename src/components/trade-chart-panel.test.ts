@@ -5,8 +5,13 @@ import {
   MARKER_OPTIONS,
   MARKER_SIZE,
   PRICE_LINE_DISABLED_OPTIONS,
+  STOP_LINE_COLOR,
+  STOP_LINE_OPACITY,
+  STOP_PRICE_LINE_STYLE,
   prepareChartData,
+  prepareStopPriceLines,
 } from "./trade-chart-panel";
+import { LineStyle } from "lightweight-charts";
 import type { TradeChartDataset } from "@/lib/market-data/trade-charts";
 
 describe("prepareChartData", () => {
@@ -55,19 +60,27 @@ describe("prepareChartData", () => {
     ]);
   });
 
-  it("adds stop-loss overlays across the visible chart window", () => {
-    const prepared = prepareChartData(
-      {
-        id: "daily",
-        label: "Daily",
-        timeframe: "1d",
-        bars: [
-          bar("2026-05-01T00:00:00.000Z", 100),
-          bar("2026-05-02T00:00:00.000Z", 102),
-        ],
-        overlays: [],
-        markers: [],
-      } satisfies TradeChartDataset,
+  it("keeps stop-loss lines out of indicator overlays", () => {
+    const prepared = prepareChartData({
+      id: "daily",
+      label: "Daily",
+      timeframe: "1d",
+      bars: [
+        bar("2026-05-01T00:00:00.000Z", 100),
+        bar("2026-05-02T00:00:00.000Z", 102),
+      ],
+      overlays: [],
+      markers: [],
+    } satisfies TradeChartDataset);
+
+    expect(prepared.overlays).toEqual([]);
+  });
+});
+
+describe("prepareStopPriceLines", () => {
+  it("uses draggable dashed 50% transparent price-line options for stop losses", () => {
+    expect(
+      prepareStopPriceLines(
       [
         {
           id: "group-1",
@@ -80,18 +93,23 @@ describe("prepareChartData", () => {
           stopUnrealizedPnl: -15,
         },
       ],
-    );
-
-    expect(prepared.overlays).toContainEqual(
+      ),
+    ).toContainEqual(
       expect.objectContaining({
-        id: "stop-group-1",
-        color: "#f97316",
-        points: [
-          { time: "2026-05-01", value: 98.25 },
-          { time: "2026-05-02", value: 98.25 },
-        ],
+        id: "group-1",
+        price: 98.25,
+        color: `rgba(${STOP_LINE_COLOR}, ${STOP_LINE_OPACITY})`,
+        lineStyle: STOP_PRICE_LINE_STYLE,
+        lineVisible: true,
+        axisLabelVisible: true,
       }),
     );
+  });
+});
+
+describe("STOP_PRICE_LINE_STYLE", () => {
+  it("uses the lightweight-charts dashed line style", () => {
+    expect(STOP_PRICE_LINE_STYLE).toBe(LineStyle.Dashed);
   });
 });
 
