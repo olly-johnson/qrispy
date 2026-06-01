@@ -4,6 +4,7 @@ import { MetricCard, ProvenanceIcon } from "@/components/metric-card";
 import { SyncButton } from "@/components/sync-button";
 import { requireUser } from "@/lib/auth/session";
 import { getDashboardData } from "@/lib/app-data";
+import { dashboardPositionUnrealizedValue } from "@/lib/positions/display";
 import { describeLatestSyncJob } from "@/lib/sync/job-status";
 
 export const dynamic = "force-dynamic";
@@ -110,7 +111,7 @@ function PositionsTable({
             <th className="px-4 py-3">Symbol</th>
             <th className="px-4 py-3 text-right">Qty</th>
             <th className="px-4 py-3 text-right">Avg</th>
-            <th className="px-4 py-3 text-right">Value</th>
+            <th className="px-4 py-3 text-right">Unrealized</th>
           </tr>
         </thead>
         <tbody className="divide-y divide-white/10">
@@ -121,8 +122,12 @@ function PositionsTable({
               <td className="px-4 py-3 text-right font-mono">
                 {formatMoney(position.averagePrice)}
               </td>
-              <td className="px-4 py-3 text-right font-mono">
-                {formatMoney(position.marketValue)}
+              <td
+                className={`px-4 py-3 text-right font-mono ${pnlClass(
+                  dashboardPositionUnrealizedValue(position),
+                )}`}
+              >
+                {formatMoney(dashboardPositionUnrealizedValue(position))}
               </td>
             </tr>
           ))}
@@ -137,6 +142,14 @@ function PositionsTable({
       </table>
     </div>
   );
+}
+
+function pnlClass(value: number | null) {
+  if (value == null) {
+    return "text-zinc-300";
+  }
+
+  return value >= 0 ? "text-emerald-300" : "text-rose-300";
 }
 
 function TradesTable({
