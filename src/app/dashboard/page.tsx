@@ -8,6 +8,7 @@ import { SyncButton } from "@/components/sync-button";
 import { requireUser } from "@/lib/auth/session";
 import { getDashboardData } from "@/lib/app-data";
 import {
+  dashboardOpenPositions,
   dashboardPositionTradeHref,
   dashboardPositionUnrealizedValue,
 } from "@/lib/positions/display";
@@ -93,7 +94,7 @@ export default async function DashboardPage() {
             <h2 className="text-lg font-semibold">Open positions</h2>
             <ProvenanceIcon metric={metrics.grossExposure} />
           </div>
-          <PositionsTable positions={data.positions.slice(0, 6)} />
+          <PositionsTable positions={dashboardOpenPositions(data.positions)} />
         </section>
         <section>
           <h2 className="mb-3 text-lg font-semibold">Recent trades</h2>

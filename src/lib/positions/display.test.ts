@@ -1,4 +1,5 @@
 import {
+  dashboardOpenPositions,
   dashboardPositionTradeHref,
   dashboardPositionUnrealizedValue,
 } from "@/lib/positions/display";
@@ -34,5 +35,16 @@ describe("dashboardPositionTradeHref", () => {
 
   it("does not link positions without open stop groups", () => {
     expect(dashboardPositionTradeHref({ stopGroups: [] })).toBeNull();
+  });
+});
+
+describe("dashboardOpenPositions", () => {
+  it("keeps every open position for the dashboard table", () => {
+    const positions = Array.from({ length: 8 }, (_, index) => ({
+      id: `position-${index + 1}`,
+    }));
+
+    expect(dashboardOpenPositions(positions)).toHaveLength(8);
+    expect(dashboardOpenPositions(positions).at(-1)?.id).toBe("position-8");
   });
 });

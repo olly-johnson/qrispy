@@ -5,6 +5,10 @@ export function dashboardPositionUnrealizedValue(position: {
   return position.stopUnrealizedPnl;
 }
 
+export function dashboardOpenPositions<T>(positions: T[]) {
+  return positions;
+}
+
 export function dashboardPositionTradeHref(position: {
   stopGroups: Array<{ tradeId: string | null | undefined }>;
 }) {
