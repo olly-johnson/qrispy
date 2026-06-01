@@ -81,6 +81,16 @@ type RebuildTradeClient = {
     }>;
   };
   from(table: "trade_stop_groups"): {
+    delete(): {
+      eq(column: "user_id", value: string): {
+        in(
+          column: "reconstruction_key",
+          values: string[],
+        ): Promise<{
+          error: unknown;
+        }>;
+      };
+    };
     select(columns: "reconstruction_key,entry_date,stop_loss_price"): {
       eq(column: "user_id", value: string): {
         in(
@@ -468,6 +478,28 @@ async function upsertTradeStopGroups(input: {
   existingStopGroups: Map<string, number | null>;
   userId: string;
 }) {
+  const openReconstructionKeys = input.trades
+    .filter((trade) => trade.status === "OPEN")
+    .map((trade) => trade.id);
+
+  if (openReconstructionKeys.length === 0) {
+    return;
+  }
+
+  const deleteExistingResult = await input.client
+    .from("trade_stop_groups")
+    .delete()
+    .eq("user_id", input.userId)
+    .in("reconstruction_key", openReconstructionKeys);
+
+  if (deleteExistingResult.error) {
+    if (isMissingStopGroupsTableError(deleteExistingResult.error)) {
+      return;
+    }
+
+    throw deleteExistingResult.error;
+  }
+
   const groups = buildOpenEntryStopGroups({
     trades: input.trades,
     fills: input.fills,
@@ -569,42 +601,83 @@ function buildOpenEntryStopGroups(input: {
       continue;
     }
 
-    for (const allocation of trade.allocations) {
-      if (allocation.allocationRole !== "ENTRY") {
-        continue;
-      }
+    const lots: Array<{
+      groupKey: string;
+      remainingQuantity: number;
+      price: number;
+    }> = [];
 
+    for (const allocation of trade.allocations) {
       const fill = fillsById.get(allocation.fillId);
       if (!fill) {
         continue;
       }
 
-      const entryDate = fill.tradeDate;
-      const key = `${trade.id}:${entryDate}`;
-      const group =
-        groups.get(key) ??
-        {
-          key,
-          userId: trade.userId,
-          tradeId,
-          reconstructionKey: trade.id,
-          accountId: trade.accountId,
-          symbol: trade.symbol,
-          direction: trade.direction,
-          entryDate,
-          quantity: 0,
-          notional: 0,
-          avgEntryPrice: 0,
-        };
+      if (allocation.allocationRole === "ENTRY") {
+        const entryDate = fill.tradeDate;
+        const key = `${trade.id}:${entryDate}`;
+        const group =
+          groups.get(key) ??
+          {
+            key,
+            userId: trade.userId,
+            tradeId,
+            reconstructionKey: trade.id,
+            accountId: trade.accountId,
+            symbol: trade.symbol,
+            direction: trade.direction,
+            entryDate,
+            quantity: 0,
+            notional: 0,
+            avgEntryPrice: 0,
+          };
 
-      group.quantity += allocation.allocatedQuantity;
-      group.notional += allocation.allocatedQuantity * allocation.allocationPrice;
-      group.avgEntryPrice = roundMoney(group.notional / group.quantity);
-      groups.set(key, group);
+        group.quantity += allocation.allocatedQuantity;
+        group.notional += allocation.allocatedQuantity * allocation.allocationPrice;
+        group.avgEntryPrice = roundMoney(group.notional / group.quantity);
+        groups.set(key, group);
+        lots.push({
+          groupKey: key,
+          remainingQuantity: allocation.allocatedQuantity,
+          price: allocation.allocationPrice,
+        });
+        continue;
+      }
+
+      let remainingExitQuantity = allocation.allocatedQuantity;
+
+      for (const lot of lots) {
+        if (remainingExitQuantity <= 0) {
+          break;
+        }
+        if (lot.remainingQuantity <= 0) {
+          continue;
+        }
+
+        const closedQuantity = Math.min(lot.remainingQuantity, remainingExitQuantity);
+        const group = groups.get(lot.groupKey);
+
+        if (group) {
+          group.quantity -= closedQuantity;
+          group.notional -= closedQuantity * lot.price;
+          group.avgEntryPrice =
+            group.quantity > 0 ? roundMoney(group.notional / group.quantity) : 0;
+        }
+
+        lot.remainingQuantity -= closedQuantity;
+        remainingExitQuantity -= closedQuantity;
+      }
     }
   }
 
-  return [...groups.values()];
+  return [...groups.values()]
+    .filter((group) => group.quantity > 0.000001)
+    .map((group) => ({
+      ...group,
+      quantity: roundMoney(group.quantity),
+      notional: roundMoney(group.notional),
+      avgEntryPrice: roundMoney(group.notional / group.quantity),
+    }));
 }
 
 async function getStopDefaultsForEntryGroups(input: {

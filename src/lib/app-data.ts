@@ -16,6 +16,7 @@ export type DashboardPosition = {
   averagePrice: number | null;
   marketValue: number | null;
   unrealizedPnl: number | null;
+  stopUnrealizedPnl: number | null;
   stopGroups: PositionStopGroup[];
 };
 
@@ -470,9 +471,8 @@ export function attachPositionStopGroups(
   positions: DashboardPosition[],
   openTrades: OpenTradeStopRow[],
 ) {
-  return positions.map((position) => ({
-    ...position,
-    stopGroups: openTrades
+  return positions.map((position) => {
+    const stopGroups = openTrades
       .filter(
         (trade) =>
           trade.accountId === position.accountId && trade.symbol === position.symbol,
@@ -486,8 +486,14 @@ export function attachPositionStopGroups(
         avgEntryPrice: trade.avgEntryPrice,
         stopLossPrice: trade.stopLossPrice,
         stopUnrealizedPnl: stopUnrealizedPnl(trade),
-      })),
-  }));
+      }));
+
+    return {
+      ...position,
+      stopGroups,
+      stopUnrealizedPnl: sumStopUnrealizedPnl(stopGroups),
+    };
+  });
 }
 
 function mapPosition(row: Record<string, unknown>): DashboardPosition {
@@ -499,6 +505,7 @@ function mapPosition(row: Record<string, unknown>): DashboardPosition {
     averagePrice: numberOrNull(row.average_price),
     marketValue: numberOrNull(row.market_value),
     unrealizedPnl: numberOrNull(row.unrealized_pnl),
+    stopUnrealizedPnl: null,
     stopGroups: [],
   };
 }
@@ -596,6 +603,18 @@ function stopUnrealizedPnl(trade: OpenTradeStopRow) {
       : (trade.stopLossPrice - trade.avgEntryPrice) * trade.quantity;
 
   return roundMoney(value);
+}
+
+function sumStopUnrealizedPnl(stopGroups: PositionStopGroup[]) {
+  const values = stopGroups
+    .map((group) => group.stopUnrealizedPnl)
+    .filter((value): value is number => value != null);
+
+  if (values.length === 0) {
+    return null;
+  }
+
+  return roundMoney(values.reduce((total, value) => total + value, 0));
 }
 
 function mapTrade(row: Record<string, unknown>): DashboardTrade {

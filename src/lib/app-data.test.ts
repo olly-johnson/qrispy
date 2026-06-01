@@ -52,6 +52,7 @@ describe("mapLatestPositions", () => {
         averagePrice: 102.36,
         marketValue: 614.16,
         unrealizedPnl: 204.72,
+        stopUnrealizedPnl: null,
         stopGroups: [],
       },
       {
@@ -62,6 +63,7 @@ describe("mapLatestPositions", () => {
         averagePrice: 14.47,
         marketValue: 336.84,
         unrealizedPnl: 134.26,
+        stopUnrealizedPnl: null,
         stopGroups: [],
       },
     ]);
@@ -129,6 +131,7 @@ describe("attachPositionStopGroups", () => {
     ).toMatchObject([
       {
         symbol: "DOCN",
+        stopUnrealizedPnl: -30,
         stopGroups: [
           {
             tradeId: "trade-1",
@@ -148,6 +151,7 @@ describe("attachPositionStopGroups", () => {
       },
       {
         symbol: "ZSL",
+        stopUnrealizedPnl: -25,
         stopGroups: [
           {
             tradeId: "trade-3",
@@ -157,6 +161,41 @@ describe("attachPositionStopGroups", () => {
             stopUnrealizedPnl: -25,
           },
         ],
+      },
+    ]);
+  });
+
+  it("leaves the stop unrealized total empty when no stop groups have stop prices", () => {
+    const positions = mapLatestPositions([
+      {
+        id: "latest-docn",
+        account_id: "account-1",
+        snapshot_at: "2026-05-28T16:39:00Z",
+        symbol: "DOCN",
+        quantity: 15,
+        average_price: 100,
+        market_value: 1500,
+        unrealized_pnl: 0,
+      },
+    ]);
+
+    expect(
+      attachPositionStopGroups(positions, [
+        {
+          tradeId: "trade-1",
+          accountId: "account-1",
+          symbol: "DOCN",
+          direction: "LONG",
+          openedAt: "2026-03-12T14:30:00.000Z",
+          quantity: 10,
+          avgEntryPrice: 90,
+          stopLossPrice: null,
+        },
+      ]),
+    ).toMatchObject([
+      {
+        symbol: "DOCN",
+        stopUnrealizedPnl: null,
       },
     ]);
   });

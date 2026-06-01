@@ -297,6 +297,99 @@ describe("replaceReconstructedTrades", () => {
     );
   });
 
+  it("reduces entry-day stop quantities by later partial exits", async () => {
+    const fillsOrder = vi.fn().mockResolvedValue({
+      data: [
+        storedFill({
+          id: "entry-day-1",
+          side: "BUY",
+          quantity: 10,
+          price: 20,
+          executedAt: "2026-01-08T15:18:00.000Z",
+          fees: 1,
+          symbol: "PART",
+        }),
+        storedFill({
+          id: "entry-day-2",
+          side: "BUY",
+          quantity: 8,
+          price: 25,
+          executedAt: "2026-01-09T15:18:00.000Z",
+          fees: 1,
+          symbol: "PART",
+        }),
+        storedFill({
+          id: "partial-exit",
+          side: "SELL",
+          quantity: 12,
+          price: 24,
+          executedAt: "2026-01-10T15:18:00.000Z",
+          fees: 1,
+          symbol: "PART",
+        }),
+      ],
+      error: null,
+    });
+    const fillsLte = vi.fn(() => ({ order: fillsOrder }));
+    const fillsGte = vi.fn(() => ({ lte: fillsLte }));
+    const fillsIn = vi.fn(() => ({ gte: fillsGte }));
+    const fillsEq = vi.fn(() => ({ in: fillsIn }));
+    const fillsSelect = vi.fn(() => ({ eq: fillsEq }));
+
+    const deleteLt = vi.fn().mockResolvedValue({ error: null });
+    const deleteGte = vi.fn(() => ({ lt: deleteLt }));
+    const deleteIn = vi.fn(() => ({ gte: deleteGte }));
+    const deleteEq = vi.fn(() => ({ in: deleteIn }));
+    const deleteTrades = vi.fn(() => ({ eq: deleteEq }));
+    const selectUpsertedTrades = vi.fn().mockResolvedValue({
+      data: [{ id: "trade-part", reconstruction_key: "account-1:PART:entry-day-1" }],
+      error: null,
+    });
+    const upsert = vi.fn(() => ({ select: selectUpsertedTrades }));
+    const insertTradeFills = vi.fn().mockResolvedValue({ error: null });
+    const stopGroupsTable = emptyStopGroupsTable();
+    const from = vi.fn((table: string) => {
+      if (table === "fills") {
+        return { select: fillsSelect };
+      }
+      if (table === "trade_fills") {
+        return { insert: insertTradeFills };
+      }
+      if (table === "trade_stop_groups") {
+        return stopGroupsTable;
+      }
+
+      return {
+        delete: deleteTrades,
+        upsert,
+      };
+    });
+
+    await replaceReconstructedTrades({
+      client: { from },
+      marketDataProvider: null,
+      userId: "user-1",
+      accountIds: ["account-1"],
+      fromDate: "2026-01-01",
+      toDate: "2026-05-28",
+    });
+
+    expect(stopGroupsTable.deleteByReconstructionKey).toHaveBeenCalledWith(
+      "reconstruction_key",
+      ["account-1:PART:entry-day-1"],
+    );
+    expect(stopGroupsTable.upsert).toHaveBeenCalledWith(
+      [
+        expect.objectContaining({
+          entry_date: "2026-01-09",
+          quantity: 6,
+          avg_entry_price: 25,
+        }),
+      ],
+      { onConflict: "user_id,reconstruction_key,entry_date" },
+    );
+  });
+
   it("continues rebuilding trades when stop group migration is not applied yet", async () => {
     const fillsOrder = vi.fn().mockResolvedValue({
       data: [
@@ -439,7 +532,15 @@ function emptyMarketDataClient() {
 }
 
 function emptyStopGroupsTable() {
+  const deleteByReconstructionKey = vi.fn().mockResolvedValue({ error: null });
+
   return {
+    deleteByReconstructionKey,
+    delete: vi.fn(() => ({
+      eq: vi.fn(() => ({
+        in: deleteByReconstructionKey,
+      })),
+    })),
     upsert: vi.fn().mockResolvedValue({ error: null }),
     select: vi.fn(() => ({
       eq: vi.fn(() => ({
@@ -456,6 +557,11 @@ function missingStopGroupsTable() {
   };
 
   return {
+    delete: vi.fn(() => ({
+      eq: vi.fn(() => ({
+        in: vi.fn().mockResolvedValue({ error }),
+      })),
+    })),
     upsert: vi.fn().mockResolvedValue({ error }),
     select: vi.fn(() => ({
       eq: vi.fn(() => ({
