@@ -51,7 +51,7 @@ type RebuildTradeClient = {
     };
   };
   from(table: "trades"): {
-    delete(): {
+    select(columns: "id,reconstruction_key"): {
       eq(column: "user_id", value: string): {
         in(column: "account_id", values: string[]): {
           gte(column: "opened_at", value: string): {
@@ -59,10 +59,21 @@ type RebuildTradeClient = {
               column: "opened_at",
               value: string,
             ): Promise<{
+              data: Record<string, unknown>[] | null;
               error: unknown;
             }>;
           };
         };
+      };
+    };
+    delete(): {
+      eq(column: "user_id", value: string): {
+        in(
+          column: "id",
+          values: string[],
+        ): Promise<{
+          error: unknown;
+        }>;
       };
     };
     upsert(
@@ -76,6 +87,16 @@ type RebuildTradeClient = {
     };
   };
   from(table: "trade_fills"): {
+    delete(): {
+      eq(column: "user_id", value: string): {
+        in(
+          column: "trade_id",
+          values: string[],
+        ): Promise<{
+          error: unknown;
+        }>;
+      };
+    };
     insert(values: Record<string, unknown>[]): Promise<{
       error: unknown;
     }>;
@@ -348,17 +369,19 @@ export async function replaceReconstructedTrades(input: {
     trades,
     userId: input.userId,
   });
-  const deleteResult = await client
-    .from("trades")
-    .delete()
-    .eq("user_id", input.userId)
-    .in("account_id", input.accountIds)
-    .gte("opened_at", `${input.fromDate}T00:00:00.000Z`)
-    .lt("opened_at", nextDate(input.toDate));
-
-  if (deleteResult.error) {
-    throw deleteResult.error;
-  }
+  const existingTrades = await loadExistingRebuiltTrades({
+    client,
+    userId: input.userId,
+    accountIds: input.accountIds,
+    fromDate: input.fromDate,
+    toDate: input.toDate,
+  });
+  await deleteStaleRebuiltTrades({
+    client,
+    existingTrades,
+    reconstructedTrades: trades,
+    userId: input.userId,
+  });
 
   if (trades.length === 0) {
     return;
@@ -429,6 +452,12 @@ export async function replaceReconstructedTrades(input: {
     }));
   });
 
+  await deleteTradeFillRows({
+    client,
+    tradeIds: [...tradeIdByReconstructionKey.values()],
+    userId: input.userId,
+  });
+
   if (tradeFillRows.length > 0) {
     const tradeFillResult = await client.from("trade_fills").insert(tradeFillRows);
 
@@ -448,6 +477,74 @@ export async function replaceReconstructedTrades(input: {
     existingStopGroups,
     userId: input.userId,
   });
+}
+
+async function loadExistingRebuiltTrades(input: {
+  client: RebuildTradeClient;
+  userId: string;
+  accountIds: string[];
+  fromDate: string;
+  toDate: string;
+}) {
+  const result = await input.client
+    .from("trades")
+    .select("id,reconstruction_key")
+    .eq("user_id", input.userId)
+    .in("account_id", input.accountIds)
+    .gte("opened_at", `${input.fromDate}T00:00:00.000Z`)
+    .lt("opened_at", nextDate(input.toDate));
+
+  if (result.error) {
+    throw result.error;
+  }
+
+  return result.data ?? [];
+}
+
+async function deleteStaleRebuiltTrades(input: {
+  client: RebuildTradeClient;
+  existingTrades: Record<string, unknown>[];
+  reconstructedTrades: ReturnType<typeof reconstructTrades>;
+  userId: string;
+}) {
+  const reconstructedKeys = new Set(input.reconstructedTrades.map((trade) => trade.id));
+  const staleTradeIds = input.existingTrades
+    .filter((trade) => !reconstructedKeys.has(String(trade.reconstruction_key)))
+    .map((trade) => String(trade.id));
+
+  if (staleTradeIds.length === 0) {
+    return;
+  }
+
+  const deleteResult = await input.client
+    .from("trades")
+    .delete()
+    .eq("user_id", input.userId)
+    .in("id", staleTradeIds);
+
+  if (deleteResult.error) {
+    throw deleteResult.error;
+  }
+}
+
+async function deleteTradeFillRows(input: {
+  client: RebuildTradeClient;
+  tradeIds: string[];
+  userId: string;
+}) {
+  if (input.tradeIds.length === 0) {
+    return;
+  }
+
+  const deleteResult = await input.client
+    .from("trade_fills")
+    .delete()
+    .eq("user_id", input.userId)
+    .in("trade_id", input.tradeIds);
+
+  if (deleteResult.error) {
+    throw deleteResult.error;
+  }
 }
 
 async function loadExistingStopGroups(input: {

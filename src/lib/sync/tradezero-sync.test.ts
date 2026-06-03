@@ -3,6 +3,103 @@ import { describe, expect, it, vi } from "vitest";
 import { replaceReconstructedTrades } from "@/lib/sync/tradezero-sync";
 
 describe("replaceReconstructedTrades", () => {
+  it("preserves trade ids for reconstructed trades that still exist", async () => {
+    const fillsOrder = vi.fn().mockResolvedValue({
+      data: [
+        storedFill({
+          id: "stable-entry",
+          side: "BUY",
+          quantity: 10,
+          price: 20,
+          executedAt: "2026-01-08T15:18:00.000Z",
+          fees: 1,
+          symbol: "STBL",
+        }),
+      ],
+      error: null,
+    });
+    const fillsLte = vi.fn(() => ({ order: fillsOrder }));
+    const fillsGte = vi.fn(() => ({ lte: fillsLte }));
+    const fillsIn = vi.fn(() => ({ gte: fillsGte }));
+    const fillsEq = vi.fn(() => ({ in: fillsIn }));
+    const fillsSelect = vi.fn(() => ({ eq: fillsEq }));
+
+    const existingTradesLt = vi.fn().mockResolvedValue({
+      data: [
+        {
+          id: "existing-stable-trade",
+          reconstruction_key: "account-1:STBL:stable-entry",
+        },
+        {
+          id: "stale-trade",
+          reconstruction_key: "account-1:OLD:old-entry",
+        },
+      ],
+      error: null,
+    });
+    const existingTradesGte = vi.fn(() => ({ lt: existingTradesLt }));
+    const existingTradesIn = vi.fn(() => ({ gte: existingTradesGte }));
+    const existingTradesEq = vi.fn(() => ({ in: existingTradesIn }));
+    const tradesSelect = vi.fn(() => ({ eq: existingTradesEq }));
+    const deleteStaleTradesById = vi.fn().mockResolvedValue({ error: null });
+    const deleteStaleTradesEq = vi.fn(() => ({ in: deleteStaleTradesById }));
+    const deleteTrades = vi.fn(() => ({ eq: deleteStaleTradesEq }));
+    const selectUpsertedTrades = vi.fn().mockResolvedValue({
+      data: [
+        {
+          id: "existing-stable-trade",
+          reconstruction_key: "account-1:STBL:stable-entry",
+        },
+      ],
+      error: null,
+    });
+    const upsert = vi.fn(() => ({ select: selectUpsertedTrades }));
+    const deleteTradeFillsByTradeId = vi.fn().mockResolvedValue({ error: null });
+    const deleteTradeFillsEq = vi.fn(() => ({ in: deleteTradeFillsByTradeId }));
+    const deleteTradeFills = vi.fn(() => ({ eq: deleteTradeFillsEq }));
+    const insertTradeFills = vi.fn().mockResolvedValue({ error: null });
+    const stopGroupsTable = emptyStopGroupsTable();
+    const from = vi.fn((table: string) => {
+      if (table === "fills") {
+        return { select: fillsSelect };
+      }
+      if (table === "trade_fills") {
+        return { delete: deleteTradeFills, insert: insertTradeFills };
+      }
+      if (table === "trade_stop_groups") {
+        return stopGroupsTable;
+      }
+
+      return {
+        delete: deleteTrades,
+        select: tradesSelect,
+        upsert,
+      };
+    });
+
+    await replaceReconstructedTrades({
+      client: { from },
+      marketDataProvider: null,
+      userId: "user-1",
+      accountIds: ["account-1"],
+      fromDate: "2026-01-01",
+      toDate: "2026-05-28",
+    });
+
+    expect(tradesSelect).toHaveBeenCalledWith("id,reconstruction_key");
+    expect(deleteStaleTradesById).toHaveBeenCalledWith("id", ["stale-trade"]);
+    expect(deleteTradeFillsByTradeId).toHaveBeenCalledWith("trade_id", [
+      "existing-stable-trade",
+    ]);
+    expect(insertTradeFills).toHaveBeenCalledWith([
+      expect.objectContaining({
+        trade_id: "existing-stable-trade",
+        fill_id: "stable-entry",
+        allocation_role: "ENTRY",
+      }),
+    ]);
+  });
+
   it("rebuilds trades from stored fills and deletes stale reconstructed rows", async () => {
     const fillsOrder = vi.fn().mockResolvedValue({
       data: [
@@ -47,11 +144,12 @@ describe("replaceReconstructedTrades", () => {
         return { select: fillsSelect };
       }
       if (table === "trade_fills") {
-        return { insert: insertTradeFills };
+        return tradeFillsTable(insertTradeFills);
       }
 
       return {
         delete: deleteTrades,
+        select: emptyTradesSelect(),
         upsert,
       };
     });
@@ -64,9 +162,6 @@ describe("replaceReconstructedTrades", () => {
       toDate: "2026-05-28",
     });
 
-    expect(deleteTrades).toHaveBeenCalledOnce();
-    expect(deleteGte).toHaveBeenCalledWith("opened_at", "2026-01-01T00:00:00.000Z");
-    expect(deleteLt).toHaveBeenCalledWith("opened_at", "2026-05-29T00:00:00.000Z");
     expect(upsert).toHaveBeenCalledOnce();
     expect(upsert.mock.calls[0][0]).toEqual([
       expect.objectContaining({
@@ -146,11 +241,12 @@ describe("replaceReconstructedTrades", () => {
         return { select: fillsSelect };
       }
       if (table === "trade_fills") {
-        return { insert: insertTradeFills };
+        return tradeFillsTable(insertTradeFills);
       }
 
       return {
         delete: deleteTrades,
+        select: emptyTradesSelect(),
         upsert,
       };
     });
@@ -222,7 +318,7 @@ describe("replaceReconstructedTrades", () => {
         return { select: fillsSelect };
       }
       if (table === "trade_fills") {
-        return { insert: insertTradeFills };
+        return tradeFillsTable(insertTradeFills);
       }
       if (table === "trade_stop_groups") {
         return stopGroupsTable;
@@ -230,6 +326,7 @@ describe("replaceReconstructedTrades", () => {
 
       return {
         delete: deleteTrades,
+        select: emptyTradesSelect(),
         upsert,
       };
     });
@@ -353,7 +450,7 @@ describe("replaceReconstructedTrades", () => {
         return { select: fillsSelect };
       }
       if (table === "trade_fills") {
-        return { insert: insertTradeFills };
+        return tradeFillsTable(insertTradeFills);
       }
       if (table === "trade_stop_groups") {
         return stopGroupsTable;
@@ -361,6 +458,7 @@ describe("replaceReconstructedTrades", () => {
 
       return {
         delete: deleteTrades,
+        select: emptyTradesSelect(),
         upsert,
       };
     });
@@ -437,7 +535,7 @@ describe("replaceReconstructedTrades", () => {
         return { select: fillsSelect };
       }
       if (table === "trade_fills") {
-        return { insert: insertTradeFills };
+        return tradeFillsTable(insertTradeFills);
       }
       if (table === "trade_stop_groups") {
         return stopGroupsTable;
@@ -445,6 +543,7 @@ describe("replaceReconstructedTrades", () => {
 
       return {
         delete: deleteTrades,
+        select: emptyTradesSelect(),
         upsert,
       };
     });
@@ -515,7 +614,7 @@ describe("replaceReconstructedTrades", () => {
         return { select: fillsSelect };
       }
       if (table === "trade_fills") {
-        return { insert: insertTradeFills };
+        return tradeFillsTable(insertTradeFills);
       }
       if (table === "trade_stop_groups") {
         return stopGroupsTable;
@@ -523,6 +622,7 @@ describe("replaceReconstructedTrades", () => {
 
       return {
         delete: deleteTrades,
+        select: emptyTradesSelect(),
         upsert,
       };
     });
@@ -616,6 +716,28 @@ function emptyMarketDataClient() {
   };
 
   return client;
+}
+
+function emptyTradesSelect() {
+  const lt = vi.fn().mockResolvedValue({ data: [], error: null });
+  const gte = vi.fn(() => ({ lt }));
+  const accountIn = vi.fn(() => ({ gte }));
+  const userEq = vi.fn(() => ({ in: accountIn }));
+
+  return vi.fn(() => ({ eq: userEq }));
+}
+
+function tradeFillsTable(insertTradeFills: ReturnType<typeof vi.fn>) {
+  const deleteByTradeId = vi.fn().mockResolvedValue({ error: null });
+
+  return {
+    delete: vi.fn(() => ({
+      eq: vi.fn(() => ({
+        in: deleteByTradeId,
+      })),
+    })),
+    insert: insertTradeFills,
+  };
 }
 
 function emptyStopGroupsTable() {
