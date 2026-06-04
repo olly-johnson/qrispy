@@ -236,7 +236,7 @@ function BreadthPressureRow({
   up: number | null;
 }) {
   return (
-    <div className="grid grid-cols-[4rem_1fr_auto] items-center gap-3 font-mono text-xs">
+    <div className="grid grid-cols-[4rem_1fr] items-center gap-3 font-mono text-xs">
       <span className="text-zinc-500">{label}</span>
       <span className="flex min-w-0 items-baseline gap-2">
         <span className={bias === "up" ? "text-base font-semibold text-emerald-300" : "text-zinc-300"}>
@@ -247,17 +247,6 @@ function BreadthPressureRow({
           {formatBreadthCount(down)}
         </span>
         <span className="text-zinc-500">down</span>
-      </span>
-      <span
-        className={`rounded px-2 py-1 text-[10px] font-semibold ${
-          bias === "up"
-            ? "bg-emerald-400/15 text-emerald-200"
-            : bias === "down"
-              ? "bg-rose-400/15 text-rose-200"
-              : "bg-zinc-800 text-zinc-400"
-        }`}
-      >
-        {breadthBiasLabel(bias)}
       </span>
     </div>
   );
@@ -377,19 +366,6 @@ function formatShortDate(value: string) {
   return `${Number(month)}/${Number(day)}`;
 }
 
-function breadthBiasLabel(value: BreadthBias) {
-  if (value === "up") {
-    return "More up";
-  }
-  if (value === "down") {
-    return "More down";
-  }
-  if (value === "flat") {
-    return "Even";
-  }
-
-  return "--";
-}
 
 function TradesTable({
   trades,
