@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 
 import {
+  buildDashboardBreadthSnapshot,
   buildMarketBreadthSnapshot,
   parseStockbeeMarketMonitorCsv,
   summarizeMarketIndexBars,
@@ -74,6 +75,61 @@ describe("summarizeMarketIndexBars", () => {
         sma50AboveSma200: true,
       }),
     );
+  });
+});
+
+describe("buildDashboardBreadthSnapshot", () => {
+  it("extracts latest 13/34, T2108, and SPY/QQQ short-term trend status", () => {
+    const snapshot = buildDashboardBreadthSnapshot(
+      buildMarketBreadthSnapshot(parseStockbeeMarketMonitorCsv(STOCKBEE_CSV)),
+      [
+        {
+          symbol: "SPY",
+          price: 754.24,
+          priceAboveSma10: true,
+          priceAboveSma20: true,
+          sma10AboveSma20: true,
+          sma50AboveSma200: true,
+        },
+        {
+          symbol: "QQQ",
+          price: 744.21,
+          priceAboveSma10: false,
+          priceAboveSma20: true,
+          sma10AboveSma20: false,
+          sma50AboveSma200: true,
+        },
+        {
+          symbol: "IWM",
+          price: 287.67,
+          priceAboveSma10: false,
+          priceAboveSma20: true,
+          sma10AboveSma20: true,
+          sma50AboveSma200: true,
+        },
+      ],
+    );
+
+    expect(snapshot).toEqual({
+      date: "2026-06-03",
+      up13In34Days: 1581,
+      down13In34Days: 1649,
+      t2108: 39.31,
+      indexes: [
+        {
+          symbol: "SPY",
+          priceAboveSma10: true,
+          priceAboveSma20: true,
+          sma10AboveSma20: true,
+        },
+        {
+          symbol: "QQQ",
+          priceAboveSma10: false,
+          priceAboveSma20: true,
+          sma10AboveSma20: false,
+        },
+      ],
+    });
   });
 });
 

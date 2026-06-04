@@ -40,6 +40,21 @@ export type MarketIndexBreadthSummary = {
   sma50AboveSma200: boolean | null;
 };
 
+export type DashboardBreadthSnapshot = {
+  date: string | null;
+  up13In34Days: number | null;
+  down13In34Days: number | null;
+  t2108: number | null;
+  indexes: DashboardBreadthIndexStatus[];
+};
+
+export type DashboardBreadthIndexStatus = {
+  symbol: string;
+  priceAboveSma10: boolean | null;
+  priceAboveSma20: boolean | null;
+  sma10AboveSma20: boolean | null;
+};
+
 type BreadthFetcher = (
   input: string,
   init?: RequestInit,
@@ -93,6 +108,33 @@ export function buildMarketBreadthSnapshot(
     latest: rows[0] ?? null,
     tableRows,
     chartRows: [...tableRows].reverse(),
+  };
+}
+
+export function buildDashboardBreadthSnapshot(
+  breadth: MarketBreadthSnapshot,
+  indexes: MarketIndexBreadthSummary[],
+): DashboardBreadthSnapshot {
+  const latest = breadth.latest;
+  const indexBySymbol = new Map(
+    indexes.map((index) => [index.symbol.toUpperCase(), index]),
+  );
+
+  return {
+    date: latest?.date ?? null,
+    up13In34Days: latest?.up13In34Days ?? null,
+    down13In34Days: latest?.down13In34Days ?? null,
+    t2108: latest?.t2108 ?? null,
+    indexes: ["SPY", "QQQ"].map((symbol) => {
+      const summary = indexBySymbol.get(symbol);
+
+      return {
+        symbol,
+        priceAboveSma10: summary?.priceAboveSma10 ?? null,
+        priceAboveSma20: summary?.priceAboveSma20 ?? null,
+        sma10AboveSma20: summary?.sma10AboveSma20 ?? null,
+      };
+    }),
   };
 }
 
