@@ -8,6 +8,15 @@ import { SyncButton } from "@/components/sync-button";
 import { requireUser } from "@/lib/auth/session";
 import { getDashboardData } from "@/lib/app-data";
 import {
+  buildDashboardBreadthSnapshot,
+  getMarketIndexBreadthSummaries,
+  getStockbeeMarketBreadth,
+  t2108Color,
+  type BreadthBias,
+  type DashboardBreadthSnapshot,
+} from "@/lib/market-data/breadth";
+import { createMassiveMarketDataProvider } from "@/lib/market-data/massive";
+import {
   dashboardOpenPositions,
   dashboardPositionTradeHref,
   dashboardPositionUnrealizedValue,
@@ -18,7 +27,10 @@ export const dynamic = "force-dynamic";
 
 export default async function DashboardPage() {
   const user = await requireUser();
-  const data = await getDashboardData(user.id);
+  const [data, breadth] = await Promise.all([
+    getDashboardData(user.id),
+    loadDashboardBreadth(),
+  ]);
   const { metrics } = data.summary;
   const latestJob = data.jobs[0];
 
@@ -88,6 +100,10 @@ export default async function DashboardPage() {
         />
       </section>
 
+      <section className="mt-4">
+        <DashboardBreadthCard breadth={breadth} />
+      </section>
+
       <div className="mt-8 grid gap-6 xl:grid-cols-[1.1fr_0.9fr]">
         <section>
           <div className="mb-3 flex items-center justify-between">
@@ -102,6 +118,148 @@ export default async function DashboardPage() {
         </section>
       </div>
     </AppShell>
+  );
+}
+
+async function loadDashboardBreadth() {
+  try {
+    const [breadth, indexes] = await Promise.all([
+      getStockbeeMarketBreadth({ rowLimit: 1 }),
+      getMarketIndexBreadthSummaries({
+        provider: createMassiveMarketDataProvider(),
+        symbols: ["SPY", "QQQ"],
+      }),
+    ]);
+
+    return buildDashboardBreadthSnapshot(breadth, indexes);
+  } catch {
+    return buildDashboardBreadthSnapshot(
+      { latest: null, tableRows: [], chartRows: [] },
+      await getMarketIndexBreadthSummaries({
+        provider: null,
+        symbols: ["SPY", "QQQ"],
+      }),
+    );
+  }
+}
+
+function DashboardBreadthCard({
+  breadth,
+}: {
+  breadth: DashboardBreadthSnapshot;
+}) {
+  return (
+    <Link
+      className="block rounded-md border border-white/10 bg-white/[0.04] p-4 transition hover:border-cyan-300/40 hover:bg-white/[0.06]"
+      href="/market-breadth"
+    >
+      <div className="flex flex-wrap items-start justify-between gap-3">
+        <div>
+          <h2 className="text-sm font-semibold uppercase tracking-[0.14em] text-zinc-400">
+            Market Breadth
+          </h2>
+          <p className="mt-1 text-sm text-zinc-500">
+            {breadth.date ? `Latest Stockbee row: ${formatShortDate(breadth.date)}` : "Latest breadth unavailable"}
+          </p>
+        </div>
+        <div className="font-mono text-sm font-semibold text-cyan-200">View</div>
+      </div>
+      <div className="mt-4 grid gap-3 md:grid-cols-[1.35fr_0.9fr_1.5fr]">
+        <div className="rounded border border-white/10 bg-black/20 p-3">
+          <div className="text-xs text-zinc-500">Breadth pressure</div>
+          <div className="mt-2 grid gap-2">
+            <BreadthPressureRow
+              bias={breadth.fourPercentBias}
+              down={breadth.down4Percent}
+              label="4% today"
+              up={breadth.up4Percent}
+            />
+            <BreadthPressureRow
+              bias={breadth.thirteenThirtyFourBias}
+              down={breadth.down13In34Days}
+              label="13/34"
+              up={breadth.up13In34Days}
+            />
+          </div>
+        </div>
+        <div className="rounded border border-white/10 bg-black/20 p-3">
+          <div className="text-xs text-zinc-500">T2108</div>
+          <div
+            className="mt-2 font-mono text-2xl font-semibold"
+            style={{ color: t2108Color(breadth.t2108) }}
+          >
+            {formatBreadthPercent(breadth.t2108)}
+          </div>
+          <div
+            aria-hidden="true"
+            className="mt-3 h-1.5 rounded-full"
+            style={{
+              background:
+                "linear-gradient(90deg, #22c55e 0%, #eab308 55%, #f97316 75%, #ef4444 100%)",
+            }}
+          />
+          <div className="mt-1 flex justify-between font-mono text-[10px] text-zinc-500">
+            <span>Low</span>
+            <span>High</span>
+          </div>
+        </div>
+        <div className="rounded border border-white/10 bg-black/20 p-3">
+          <div className="grid gap-2 sm:grid-cols-2">
+            {breadth.indexes.map((index) => (
+              <div key={index.symbol}>
+                <div className="font-mono text-sm font-semibold text-white">
+                  {index.symbol}
+                </div>
+                <div className="mt-2 grid gap-1 text-xs text-zinc-400">
+                  <MiniStatus label=">10" value={index.priceAboveSma10} />
+                  <MiniStatus label=">20" value={index.priceAboveSma20} />
+                  <MiniStatus label="10>20" value={index.sma10AboveSma20} />
+                </div>
+              </div>
+            ))}
+          </div>
+        </div>
+      </div>
+    </Link>
+  );
+}
+
+function BreadthPressureRow({
+  bias,
+  down,
+  label,
+  up,
+}: {
+  bias: BreadthBias;
+  down: number | null;
+  label: string;
+  up: number | null;
+}) {
+  return (
+    <div className="grid grid-cols-[4rem_1fr] items-center gap-3 font-mono text-xs">
+      <span className="text-zinc-500">{label}</span>
+      <span className="flex min-w-0 items-baseline gap-2">
+        <span className={bias === "up" ? "text-base font-semibold text-emerald-300" : "text-zinc-300"}>
+          {formatBreadthCount(up)}
+        </span>
+        <span className="text-zinc-500">up</span>
+        <span className={bias === "down" ? "text-base font-semibold text-rose-300" : "text-zinc-300"}>
+          {formatBreadthCount(down)}
+        </span>
+        <span className="text-zinc-500">down</span>
+      </span>
+    </div>
+  );
+}
+
+function MiniStatus({ label, value }: { label: string; value: boolean | null }) {
+  return (
+    <div className="flex items-center justify-between gap-2">
+      <span>{label}</span>
+      <span className={value == null ? "text-zinc-500" : value ? "text-emerald-300" : "text-rose-300"}>
+        {value == null ? "--" : value ? "Yes" : "No"}
+      </span>
+    </div>
   );
 }
 
@@ -185,6 +343,29 @@ function pnlClass(value: number | null) {
 
   return value >= 0 ? "text-emerald-300" : "text-rose-300";
 }
+
+function formatBreadthCount(value: number | null) {
+  if (value == null) {
+    return "--";
+  }
+
+  return new Intl.NumberFormat("en-US", { maximumFractionDigits: 0 }).format(value);
+}
+
+function formatBreadthPercent(value: number | null) {
+  if (value == null) {
+    return "--";
+  }
+
+  return `${new Intl.NumberFormat("en-US", { maximumFractionDigits: 1 }).format(value)}%`;
+}
+
+function formatShortDate(value: string) {
+  const [, month, day] = value.split("-");
+
+  return `${Number(month)}/${Number(day)}`;
+}
+
 
 function TradesTable({
   trades,
