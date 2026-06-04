@@ -14,6 +14,7 @@ export type GappersRow = {
   lastUpdatedAt: string | null;
   name: string;
   previousClose: number;
+  previousCloseAt: string;
   price: number;
   securityType: GappersSecurityType;
   symbol: string;
@@ -50,6 +51,7 @@ export async function buildGappersSnapshot({
 }): Promise<GappersSnapshot> {
   const mode = getGappersMode(now);
   const loadedAt = now.toISOString();
+  const previousCloseAt = getPreviousRegularCloseAt(now).toISOString();
 
   if (!provider) {
     return {
@@ -73,7 +75,8 @@ export async function buildGappersSnapshot({
           universe.get(String(snapshot.ticker ?? "").toUpperCase()),
         ),
       )
-      .filter((row): row is GappersRow => row != null)
+      .filter((row): row is Omit<GappersRow, "previousCloseAt"> => row != null)
+      .map((row) => ({ ...row, previousCloseAt }))
       .filter((row) => row.price > MIN_SERVER_PRICE && row.gapPercent >= MIN_SERVER_GAP_PERCENT);
 
     const rows =
@@ -185,7 +188,7 @@ function buildUniverse(references: MassiveReferenceTicker[]) {
 function normalizeCandidate(
   snapshot: MassiveSnapshotTicker,
   reference: { name: string; securityType: GappersSecurityType } | undefined,
-): GappersRow | null {
+): Omit<GappersRow, "previousCloseAt"> | null {
   const symbol = String(snapshot.ticker ?? "").toUpperCase();
   const price = firstFiniteNumber([
     getPath(snapshot, ["fmv"]),
@@ -222,6 +225,22 @@ function normalizeCandidate(
 
 function sortByDollarVolume(rows: GappersRow[]) {
   return [...rows].sort((a, b) => b.activeDollarVolume - a.activeDollarVolume || a.symbol.localeCompare(b.symbol));
+}
+
+function getPreviousRegularCloseAt(now: Date) {
+  const today = easternDateParts(now);
+  const yesterdayNoon = new Date(
+    Date.UTC(today.year, today.month - 1, today.day - 1, 12),
+  );
+  const yesterday = easternDateParts(yesterdayNoon);
+
+  return easternDateTimeToUtc(
+    yesterday.year,
+    yesterday.month,
+    yesterday.day,
+    16,
+    0,
+  );
 }
 
 function isInAnyWindow(value: Date, windows: ExtendedHoursWindow[]) {
