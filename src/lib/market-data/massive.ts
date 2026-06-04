@@ -26,6 +26,15 @@ export type MassiveSnapshotTicker = Record<string, unknown> & {
   ticker?: string;
 };
 
+export type MassiveNewsArticle = {
+  articleUrl: string | null;
+  description: string | null;
+  id: string;
+  publishedUtc: string;
+  tickers: string[];
+  title: string;
+};
+
 const TIMEFRAME_PATH: Record<MarketDataTimeframe, { multiplier: number; timespan: string }> = {
   "1d": { multiplier: 1, timespan: "day" },
   "1w": { multiplier: 1, timespan: "week" },
@@ -87,6 +96,35 @@ export class MassiveMarketDataProvider implements MarketDataProvider {
     return Array.isArray(payload.tickers)
       ? (payload.tickers as MassiveSnapshotTicker[])
       : [];
+  }
+
+  async getTickerNews({
+    publishedAfter,
+    ticker,
+  }: {
+    publishedAfter: string;
+    ticker: string;
+  }): Promise<MassiveNewsArticle[]> {
+    const url = new URL(`${this.baseUrl}/v2/reference/news`);
+    url.searchParams.set("ticker", ticker.toUpperCase());
+    url.searchParams.set("published_utc.gt", publishedAfter);
+    url.searchParams.set("sort", "published_utc");
+    url.searchParams.set("order", "desc");
+    url.searchParams.set("limit", "50");
+    url.searchParams.set("apiKey", this.apiKey);
+
+    const response = await this.fetcher(url.toString(), { cache: "no-store" });
+
+    if (!response.ok) {
+      throw new Error(`Massive news request failed with ${response.status}`);
+    }
+
+    const payload = (await response.json()) as { results?: unknown[] };
+    const results = Array.isArray(payload.results) ? payload.results : [];
+
+    return results
+      .map(normalizeNewsArticle)
+      .filter((article) => article != null);
   }
 
   private buildAggregateUrl(request: MarketDataRequest) {
@@ -164,6 +202,26 @@ function normalizeAggregate(result: unknown, request: MarketDataRequest): OhlcvB
     volume: numberFrom(row.v) ?? 0,
     adjusted: request.adjusted,
     rawPayload: result,
+  };
+}
+
+function normalizeNewsArticle(result: unknown): MassiveNewsArticle | null {
+  const row = result as Record<string, unknown>;
+  const id = String(row.id ?? "");
+  const publishedUtc = String(row.published_utc ?? "");
+  const title = String(row.title ?? "");
+
+  if (!id || !publishedUtc || !title) {
+    return null;
+  }
+
+  return {
+    articleUrl: typeof row.article_url === "string" ? row.article_url : null,
+    description: typeof row.description === "string" ? row.description : null,
+    id,
+    publishedUtc,
+    tickers: Array.isArray(row.tickers) ? row.tickers.map(String) : [],
+    title,
   };
 }
 

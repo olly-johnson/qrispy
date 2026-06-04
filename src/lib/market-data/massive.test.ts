@@ -145,4 +145,53 @@ describe("MassiveMarketDataProvider", () => {
     expect(url.searchParams.get("apiKey")).toBe("massive-key");
     expect(fetcher.mock.calls[0][1]).toEqual({ cache: "no-store" });
   });
+
+  it("fetches ticker news published after the previous close", async () => {
+    const fetcher = vi.fn().mockResolvedValue({
+      ok: true,
+      status: 200,
+      json: async () => ({
+        results: [
+          {
+            article_url: "https://example.com/acme",
+            description: "Acme reported earnings.",
+            id: "article-1",
+            published_utc: "2026-06-04T11:00:00.000Z",
+            tickers: ["ACME"],
+            title: "Acme jumps on earnings",
+          },
+        ],
+      }),
+    });
+    const provider = new MassiveMarketDataProvider({
+      apiKey: "massive-key",
+      fetcher,
+    });
+
+    await expect(
+      provider.getTickerNews({
+        publishedAfter: "2026-06-03T20:00:00.000Z",
+        ticker: "acme",
+      }),
+    ).resolves.toEqual([
+      expect.objectContaining({
+        articleUrl: "https://example.com/acme",
+        id: "article-1",
+        publishedUtc: "2026-06-04T11:00:00.000Z",
+        title: "Acme jumps on earnings",
+      }),
+    ]);
+
+    const url = new URL(fetcher.mock.calls[0][0]);
+    expect(url.pathname).toBe("/v2/reference/news");
+    expect(url.searchParams.get("ticker")).toBe("ACME");
+    expect(url.searchParams.get("published_utc.gt")).toBe(
+      "2026-06-03T20:00:00.000Z",
+    );
+    expect(url.searchParams.get("sort")).toBe("published_utc");
+    expect(url.searchParams.get("order")).toBe("desc");
+    expect(url.searchParams.get("limit")).toBe("50");
+    expect(url.searchParams.get("apiKey")).toBe("massive-key");
+    expect(fetcher.mock.calls[0][1]).toEqual({ cache: "no-store" });
+  });
 });
