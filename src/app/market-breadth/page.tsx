@@ -15,10 +15,8 @@ import { createMassiveMarketDataProvider } from "@/lib/market-data/massive";
 export const dynamic = "force-dynamic";
 
 const STOCKBEE_PAGE_URL = "https://stockbee.blogspot.com/p/mm.html";
-const STOCKCHARTS_NYMO_URL =
-  "https://stockcharts.com/c-sc/sc?s=%24NYMO&p=D&yr=0&mn=3&dy=0&i=t2706791378c";
-const STOCKCHARTS_NASI_URL =
-  "https://stockcharts.com/c-sc/sc?s=%24NASI&p=D&yr=0&mn=3&dy=0&i=t2706791378c";
+const STOCKCHARTS_NYMO_IMAGE_URL = "/api/market-breadth/stockcharts/nymo";
+const STOCKCHARTS_NASI_IMAGE_URL = "/api/market-breadth/stockcharts/nasi";
 
 export default async function MarketBreadthPage() {
   const user = await requireUser();
@@ -432,8 +430,8 @@ function DateTicks({
 function StockChartsPanels() {
   return (
     <section className="mt-4 grid gap-4 xl:grid-cols-2">
-      <StockChartPanel href="https://stockcharts.com/h-sc/ui?s=%24NYMO" imageUrl={STOCKCHARTS_NYMO_URL} title="NYMO (McClellan Oscillator)" />
-      <StockChartPanel href="https://stockcharts.com/h-sc/ui?s=%24NASI" imageUrl={STOCKCHARTS_NASI_URL} title="NASI (McClellan Summation Index)" />
+      <StockChartPanel href="https://stockcharts.com/h-sc/ui?s=%24NYMO" imageUrl={STOCKCHARTS_NYMO_IMAGE_URL} title="NYMO (McClellan Oscillator)" />
+      <StockChartPanel href="https://stockcharts.com/h-sc/ui?s=%24NASI" imageUrl={STOCKCHARTS_NASI_IMAGE_URL} title="NASI (McClellan Summation Index)" />
     </section>
   );
 }
