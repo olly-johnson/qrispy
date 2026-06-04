@@ -42,11 +42,17 @@ export type MarketIndexBreadthSummary = {
 
 export type DashboardBreadthSnapshot = {
   date: string | null;
+  up4Percent: number | null;
+  down4Percent: number | null;
+  fourPercentBias: BreadthBias;
   up13In34Days: number | null;
   down13In34Days: number | null;
+  thirteenThirtyFourBias: BreadthBias;
   t2108: number | null;
   indexes: DashboardBreadthIndexStatus[];
 };
+
+export type BreadthBias = "down" | "flat" | "up" | null;
 
 export type DashboardBreadthIndexStatus = {
   symbol: string;
@@ -122,8 +128,15 @@ export function buildDashboardBreadthSnapshot(
 
   return {
     date: latest?.date ?? null,
+    up4Percent: latest?.up4Percent ?? null,
+    down4Percent: latest?.down4Percent ?? null,
+    fourPercentBias: breadthBias(latest?.up4Percent, latest?.down4Percent),
     up13In34Days: latest?.up13In34Days ?? null,
     down13In34Days: latest?.down13In34Days ?? null,
+    thirteenThirtyFourBias: breadthBias(
+      latest?.up13In34Days,
+      latest?.down13In34Days,
+    ),
     t2108: latest?.t2108 ?? null,
     indexes: ["SPY", "QQQ"].map((symbol) => {
       const summary = indexBySymbol.get(symbol);
@@ -136,6 +149,27 @@ export function buildDashboardBreadthSnapshot(
       };
     }),
   };
+}
+
+export function t2108Color(value: number | null) {
+  if (value == null) {
+    return "#71717a";
+  }
+
+  if (value <= 20) {
+    return "#22c55e";
+  }
+  if (value <= 50) {
+    return interpolateColor("#22c55e", "#eab308", (value - 20) / 30);
+  }
+  if (value <= 70) {
+    return interpolateColor("#eab308", "#f97316", (value - 50) / 20);
+  }
+  if (value <= 90) {
+    return interpolateColor("#f97316", "#ef4444", (value - 70) / 20);
+  }
+
+  return "#ef4444";
 }
 
 export async function getMarketIndexBreadthSummaries(input: {
@@ -300,6 +334,35 @@ function compareGreater(left: number | null, right: number | null) {
   }
 
   return left > right;
+}
+
+function breadthBias(
+  up: number | null | undefined,
+  down: number | null | undefined,
+): BreadthBias {
+  if (up == null || down == null) {
+    return null;
+  }
+  if (up === down) {
+    return "flat";
+  }
+
+  return up > down ? "up" : "down";
+}
+
+function interpolateColor(from: string, to: string, ratio: number) {
+  const boundedRatio = Math.min(1, Math.max(0, ratio));
+  const fromRgb = rgbFromHex(from);
+  const toRgb = rgbFromHex(to);
+  const rgb = fromRgb.map((channel, index) =>
+    Math.round(channel + (toRgb[index] - channel) * boundedRatio),
+  );
+
+  return `#${rgb.map((channel) => channel.toString(16).padStart(2, "0")).join("")}`;
+}
+
+function rgbFromHex(hex: string) {
+  return [1, 3, 5].map((start) => Number.parseInt(hex.slice(start, start + 2), 16));
 }
 
 function emptyMarketIndexSummary(symbol: string): MarketIndexBreadthSummary {

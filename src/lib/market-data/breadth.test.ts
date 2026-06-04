@@ -5,6 +5,7 @@ import {
   buildMarketBreadthSnapshot,
   parseStockbeeMarketMonitorCsv,
   summarizeMarketIndexBars,
+  t2108Color,
 } from "./breadth";
 import type { OhlcvBar } from "./types";
 
@@ -112,8 +113,12 @@ describe("buildDashboardBreadthSnapshot", () => {
 
     expect(snapshot).toEqual({
       date: "2026-06-03",
+      up4Percent: 154,
+      down4Percent: 441,
+      fourPercentBias: "down",
       up13In34Days: 1581,
       down13In34Days: 1649,
+      thirteenThirtyFourBias: "down",
       t2108: 39.31,
       indexes: [
         {
@@ -130,6 +135,15 @@ describe("buildDashboardBreadthSnapshot", () => {
         },
       ],
     });
+  });
+});
+
+describe("t2108Color", () => {
+  it("moves from green to yellow/orange to red as T2108 rises", () => {
+    expect(t2108Color(10)).toBe("#22c55e");
+    expect(t2108Color(50)).toBe("#eab308");
+    expect(t2108Color(70)).toBe("#f97316");
+    expect(t2108Color(90)).toBe("#ef4444");
   });
 });
 

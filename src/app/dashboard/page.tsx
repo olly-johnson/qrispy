@@ -11,6 +11,8 @@ import {
   buildDashboardBreadthSnapshot,
   getMarketIndexBreadthSummaries,
   getStockbeeMarketBreadth,
+  t2108Color,
+  type BreadthBias,
   type DashboardBreadthSnapshot,
 } from "@/lib/market-data/breadth";
 import { createMassiveMarketDataProvider } from "@/lib/market-data/massive";
@@ -162,24 +164,43 @@ function DashboardBreadthCard({
         </div>
         <div className="font-mono text-sm font-semibold text-cyan-200">View</div>
       </div>
-      <div className="mt-4 grid gap-3 md:grid-cols-[1fr_1fr_1.5fr]">
+      <div className="mt-4 grid gap-3 md:grid-cols-[1.35fr_0.9fr_1.5fr]">
         <div className="rounded border border-white/10 bg-black/20 p-3">
-          <div className="text-xs text-zinc-500">13% in 34 days</div>
-          <div className="mt-2 flex items-baseline justify-between gap-3 font-mono">
-            <span className="text-lg font-semibold text-emerald-300">
-              {formatBreadthCount(breadth.up13In34Days)}
-            </span>
-            <span className="text-xs text-zinc-500">up</span>
-            <span className="text-lg font-semibold text-rose-300">
-              {formatBreadthCount(breadth.down13In34Days)}
-            </span>
-            <span className="text-xs text-zinc-500">down</span>
+          <div className="text-xs text-zinc-500">Breadth pressure</div>
+          <div className="mt-2 grid gap-2">
+            <BreadthPressureRow
+              bias={breadth.fourPercentBias}
+              down={breadth.down4Percent}
+              label="4% today"
+              up={breadth.up4Percent}
+            />
+            <BreadthPressureRow
+              bias={breadth.thirteenThirtyFourBias}
+              down={breadth.down13In34Days}
+              label="13/34"
+              up={breadth.up13In34Days}
+            />
           </div>
         </div>
         <div className="rounded border border-white/10 bg-black/20 p-3">
           <div className="text-xs text-zinc-500">T2108</div>
-          <div className="mt-2 font-mono text-2xl font-semibold text-white">
+          <div
+            className="mt-2 font-mono text-2xl font-semibold"
+            style={{ color: t2108Color(breadth.t2108) }}
+          >
             {formatBreadthPercent(breadth.t2108)}
+          </div>
+          <div
+            aria-hidden="true"
+            className="mt-3 h-1.5 rounded-full"
+            style={{
+              background:
+                "linear-gradient(90deg, #22c55e 0%, #eab308 55%, #f97316 75%, #ef4444 100%)",
+            }}
+          />
+          <div className="mt-1 flex justify-between font-mono text-[10px] text-zinc-500">
+            <span>Low</span>
+            <span>High</span>
           </div>
         </div>
         <div className="rounded border border-white/10 bg-black/20 p-3">
@@ -200,6 +221,45 @@ function DashboardBreadthCard({
         </div>
       </div>
     </Link>
+  );
+}
+
+function BreadthPressureRow({
+  bias,
+  down,
+  label,
+  up,
+}: {
+  bias: BreadthBias;
+  down: number | null;
+  label: string;
+  up: number | null;
+}) {
+  return (
+    <div className="grid grid-cols-[4rem_1fr_auto] items-center gap-3 font-mono text-xs">
+      <span className="text-zinc-500">{label}</span>
+      <span className="flex min-w-0 items-baseline gap-2">
+        <span className={bias === "up" ? "text-base font-semibold text-emerald-300" : "text-zinc-300"}>
+          {formatBreadthCount(up)}
+        </span>
+        <span className="text-zinc-500">up</span>
+        <span className={bias === "down" ? "text-base font-semibold text-rose-300" : "text-zinc-300"}>
+          {formatBreadthCount(down)}
+        </span>
+        <span className="text-zinc-500">down</span>
+      </span>
+      <span
+        className={`rounded px-2 py-1 text-[10px] font-semibold ${
+          bias === "up"
+            ? "bg-emerald-400/15 text-emerald-200"
+            : bias === "down"
+              ? "bg-rose-400/15 text-rose-200"
+              : "bg-zinc-800 text-zinc-400"
+        }`}
+      >
+        {breadthBiasLabel(bias)}
+      </span>
+    </div>
   );
 }
 
@@ -315,6 +375,20 @@ function formatShortDate(value: string) {
   const [, month, day] = value.split("-");
 
   return `${Number(month)}/${Number(day)}`;
+}
+
+function breadthBiasLabel(value: BreadthBias) {
+  if (value === "up") {
+    return "More up";
+  }
+  if (value === "down") {
+    return "More down";
+  }
+  if (value === "flat") {
+    return "Even";
+  }
+
+  return "--";
 }
 
 function TradesTable({
