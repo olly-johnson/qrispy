@@ -1,9 +1,17 @@
+import Link from "next/link";
+import type { ReactNode } from "react";
+
 import { AppShell } from "@/components/app-shell";
 import { formatDateTime, formatMoney, formatPercent } from "@/components/format";
 import { MetricCard, ProvenanceIcon } from "@/components/metric-card";
 import { SyncButton } from "@/components/sync-button";
 import { requireUser } from "@/lib/auth/session";
 import { getDashboardData } from "@/lib/app-data";
+import {
+  dashboardOpenPositions,
+  dashboardPositionTradeHref,
+  dashboardPositionUnrealizedValue,
+} from "@/lib/positions/display";
 import { describeLatestSyncJob } from "@/lib/sync/job-status";
 
 export const dynamic = "force-dynamic";
@@ -39,7 +47,12 @@ export default async function DashboardPage() {
       ) : null}
 
       <section className="mt-6 grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
-        <MetricCard label="Equity" value={formatMoney(metrics.equity.value)} accent="emerald" />
+        <MetricCard
+          label="Equity"
+          metric={metrics.equity}
+          value={formatMoney(metrics.equity.value)}
+          accent="emerald"
+        />
         <MetricCard label="Cash" value={formatMoney(metrics.cash.value)} />
         <MetricCard
           label="Buying Power"
@@ -81,7 +94,7 @@ export default async function DashboardPage() {
             <h2 className="text-lg font-semibold">Open positions</h2>
             <ProvenanceIcon metric={metrics.grossExposure} />
           </div>
-          <PositionsTable positions={data.positions.slice(0, 6)} />
+          <PositionsTable positions={dashboardOpenPositions(data.positions)} />
         </section>
         <section>
           <h2 className="mb-3 text-lg font-semibold">Recent trades</h2>
@@ -105,22 +118,33 @@ function PositionsTable({
             <th className="px-4 py-3">Symbol</th>
             <th className="px-4 py-3 text-right">Qty</th>
             <th className="px-4 py-3 text-right">Avg</th>
-            <th className="px-4 py-3 text-right">Value</th>
+            <th className="px-4 py-3 text-right">Unrealized</th>
           </tr>
         </thead>
         <tbody className="divide-y divide-white/10">
-          {positions.map((position) => (
-            <tr key={position.id}>
-              <td className="px-4 py-3 font-mono text-cyan-200">{position.symbol}</td>
-              <td className="px-4 py-3 text-right font-mono">{position.quantity}</td>
-              <td className="px-4 py-3 text-right font-mono">
-                {formatMoney(position.averagePrice)}
-              </td>
-              <td className="px-4 py-3 text-right font-mono">
-                {formatMoney(position.marketValue)}
-              </td>
-            </tr>
-          ))}
+          {positions.map((position) => {
+            const href = dashboardPositionTradeHref(position);
+            const stopUnrealizedValue = dashboardPositionUnrealizedValue(position);
+
+            return (
+              <tr className={href ? "hover:bg-white/[0.03]" : undefined} key={position.id}>
+                <td className="font-mono text-cyan-200">
+                  <PositionCell href={href}>{position.symbol}</PositionCell>
+                </td>
+                <td className="text-right font-mono">
+                  <PositionCell href={href}>{position.quantity}</PositionCell>
+                </td>
+                <td className="text-right font-mono">
+                  <PositionCell href={href}>
+                    {formatMoney(position.averagePrice)}
+                  </PositionCell>
+                </td>
+                <td className={`text-right font-mono ${pnlClass(stopUnrealizedValue)}`}>
+                  <PositionCell href={href}>{formatMoney(stopUnrealizedValue)}</PositionCell>
+                </td>
+              </tr>
+            );
+          })}
           {positions.length === 0 ? (
             <tr>
               <td className="px-4 py-6 text-zinc-500" colSpan={4}>
@@ -132,6 +156,34 @@ function PositionsTable({
       </table>
     </div>
   );
+}
+
+function PositionCell({
+  children,
+  href,
+}: {
+  children: ReactNode;
+  href: string | null;
+}) {
+  const className = "block px-4 py-3";
+
+  if (!href) {
+    return <span className={className}>{children}</span>;
+  }
+
+  return (
+    <Link className={className} href={href}>
+      {children}
+    </Link>
+  );
+}
+
+function pnlClass(value: number | null) {
+  if (value == null) {
+    return "text-zinc-300";
+  }
+
+  return value >= 0 ? "text-emerald-300" : "text-rose-300";
 }
 
 function TradesTable({

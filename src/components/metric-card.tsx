@@ -5,6 +5,7 @@ import { provenanceLabel } from "@/components/format";
 
 export function MetricCard({
   label,
+  metric,
   value,
   accent = "cyan",
 }: {
@@ -22,7 +23,10 @@ export function MetricCard({
 
   return (
     <div className="rounded-md border border-white/10 bg-white/[0.045] p-4">
-      <div className="text-xs uppercase tracking-[0.16em] text-zinc-500">{label}</div>
+      <div className="flex items-center gap-1.5 text-xs uppercase tracking-[0.16em] text-zinc-500">
+        {label}
+        {metric ? <ProvenanceIcon metric={metric} /> : null}
+      </div>
       <div className={`mt-3 font-mono text-2xl font-semibold ${accentClass}`}>
         {value}
       </div>

@@ -125,6 +125,7 @@ function tradeDetail(): TradeDetail {
     avgExitPrice: 21,
     realizedPnl: 8,
     totalFees: 2,
+    stopGroups: [],
     fills: [
       {
         id: "fill-1",

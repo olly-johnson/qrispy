@@ -1,6 +1,12 @@
 import { describe, expect, it, vi } from "vitest";
 
-import { getTradeDetail, getTradeHistory, mapLatestPositions } from "@/lib/app-data";
+import {
+  attachPositionStopGroups,
+  getTradeDetail,
+  getTradeHistory,
+  loadStopGroupRows,
+  mapLatestPositions,
+} from "@/lib/app-data";
 
 describe("mapLatestPositions", () => {
   it("keeps only one row per account and symbol from the latest snapshot", () => {
@@ -40,21 +46,286 @@ describe("mapLatestPositions", () => {
     ).toEqual([
       {
         id: "latest-docn",
+        accountId: "account-1",
         symbol: "DOCN",
         quantity: 4,
         averagePrice: 102.36,
         marketValue: 614.16,
         unrealizedPnl: 204.72,
+        stopUnrealizedPnl: null,
+        stopGroups: [],
       },
       {
         id: "latest-fcel",
+        accountId: "account-1",
         symbol: "FCEL",
         quantity: 14,
         averagePrice: 14.47,
         marketValue: 336.84,
         unrealizedPnl: 134.26,
+        stopUnrealizedPnl: null,
+        stopGroups: [],
       },
     ]);
+  });
+});
+
+describe("attachPositionStopGroups", () => {
+  it("adds one editable stop group per open entry date", () => {
+    const positions = mapLatestPositions([
+      {
+        id: "latest-docn",
+        account_id: "account-1",
+        snapshot_at: "2026-05-28T16:39:00Z",
+        symbol: "DOCN",
+        quantity: 15,
+        average_price: 100,
+        market_value: 1500,
+        unrealized_pnl: 0,
+      },
+      {
+        id: "latest-zsl",
+        account_id: "account-1",
+        snapshot_at: "2026-05-28T16:39:00Z",
+        symbol: "ZSL",
+        quantity: -5,
+        average_price: 40,
+        market_value: -225,
+        unrealized_pnl: -25,
+      },
+    ]);
+
+    expect(
+      attachPositionStopGroups(positions, [
+        {
+          stopGroupId: "group-1",
+          tradeId: "trade-1",
+          accountId: "account-1",
+          symbol: "DOCN",
+          direction: "LONG",
+          openedAt: "2026-03-12T14:30:00.000Z",
+          quantity: 10,
+          avgEntryPrice: 90,
+          stopLossPrice: 86,
+        },
+        {
+          tradeId: "trade-2",
+          accountId: "account-1",
+          symbol: "DOCN",
+          direction: "LONG",
+          openedAt: "2026-04-04T14:30:00.000Z",
+          quantity: 5,
+          avgEntryPrice: 80,
+          stopLossPrice: 82,
+        },
+        {
+          tradeId: "trade-3",
+          accountId: "account-1",
+          symbol: "ZSL",
+          direction: "SHORT",
+          openedAt: "2026-01-29T14:30:00.000Z",
+          quantity: 5,
+          avgEntryPrice: 40,
+          stopLossPrice: 45,
+        },
+      ]),
+    ).toMatchObject([
+      {
+        symbol: "DOCN",
+        stopUnrealizedPnl: -30,
+        stopGroups: [
+          {
+            id: "group-1",
+            tradeId: "trade-1",
+            entryDate: "2026-03-12",
+            quantity: 10,
+            stopLossPrice: 86,
+            stopUnrealizedPnl: -40,
+          },
+          {
+            tradeId: "trade-2",
+            entryDate: "2026-04-04",
+            quantity: 5,
+            stopLossPrice: 82,
+            stopUnrealizedPnl: 10,
+          },
+        ],
+      },
+      {
+        symbol: "ZSL",
+        stopUnrealizedPnl: -25,
+        stopGroups: [
+          {
+            tradeId: "trade-3",
+            entryDate: "2026-01-29",
+            quantity: 5,
+            stopLossPrice: 45,
+            stopUnrealizedPnl: -25,
+          },
+        ],
+      },
+    ]);
+  });
+
+  it("leaves the stop unrealized total empty when no stop groups have stop prices", () => {
+    const positions = mapLatestPositions([
+      {
+        id: "latest-docn",
+        account_id: "account-1",
+        snapshot_at: "2026-05-28T16:39:00Z",
+        symbol: "DOCN",
+        quantity: 15,
+        average_price: 100,
+        market_value: 1500,
+        unrealized_pnl: 0,
+      },
+    ]);
+
+    expect(
+      attachPositionStopGroups(positions, [
+        {
+          tradeId: "trade-1",
+          accountId: "account-1",
+          symbol: "DOCN",
+          direction: "LONG",
+          openedAt: "2026-03-12T14:30:00.000Z",
+          quantity: 10,
+          avgEntryPrice: 90,
+          stopLossPrice: null,
+        },
+      ]),
+    ).toMatchObject([
+      {
+        symbol: "DOCN",
+        stopUnrealizedPnl: null,
+      },
+    ]);
+  });
+
+  it("caps stop groups to the latest broker position quantity", () => {
+    const positions = mapLatestPositions([
+      {
+        id: "latest-fcel",
+        account_id: "account-1",
+        snapshot_at: "2026-06-01T13:54:40Z",
+        symbol: "FCEL",
+        quantity: 7,
+        average_price: 14.47,
+        market_value: 145.95,
+        unrealized_pnl: 44.66,
+      },
+    ]);
+
+    expect(
+      attachPositionStopGroups(positions, [
+        {
+          stopGroupId: "group-1",
+          tradeId: "trade-1",
+          accountId: "account-1",
+          symbol: "FCEL",
+          direction: "LONG",
+          openedAt: "2026-05-11T13:51:49.000Z",
+          quantity: 14,
+          avgEntryPrice: 14.47,
+          stopLossPrice: 15.99,
+        },
+      ]),
+    ).toMatchObject([
+      {
+        symbol: "FCEL",
+        stopUnrealizedPnl: 10.64,
+        stopGroups: [
+          {
+            id: "group-1",
+            quantity: 7,
+            stopUnrealizedPnl: 10.64,
+          },
+        ],
+      },
+    ]);
+  });
+
+  it("allocates a live position across multiple stop groups without over-counting", () => {
+    const positions = mapLatestPositions([
+      {
+        id: "latest-docn",
+        account_id: "account-1",
+        snapshot_at: "2026-06-01T13:54:40Z",
+        symbol: "DOCN",
+        quantity: 12,
+        average_price: 100,
+        market_value: 1200,
+        unrealized_pnl: 0,
+      },
+    ]);
+
+    expect(
+      attachPositionStopGroups(positions, [
+        {
+          stopGroupId: "older",
+          tradeId: "trade-1",
+          accountId: "account-1",
+          symbol: "DOCN",
+          direction: "LONG",
+          openedAt: "2026-05-01T13:51:49.000Z",
+          quantity: 10,
+          avgEntryPrice: 100,
+          stopLossPrice: 90,
+        },
+        {
+          stopGroupId: "newer",
+          tradeId: "trade-2",
+          accountId: "account-1",
+          symbol: "DOCN",
+          direction: "LONG",
+          openedAt: "2026-05-29T13:51:49.000Z",
+          quantity: 10,
+          avgEntryPrice: 100,
+          stopLossPrice: 95,
+        },
+      ]),
+    ).toMatchObject([
+      {
+        symbol: "DOCN",
+        stopUnrealizedPnl: -110,
+        stopGroups: [
+          {
+            id: "older",
+            quantity: 10,
+            stopUnrealizedPnl: -100,
+          },
+          {
+            id: "newer",
+            quantity: 2,
+            stopUnrealizedPnl: -10,
+          },
+        ],
+      },
+    ]);
+  });
+});
+
+describe("loadStopGroupRows", () => {
+  it("falls back to no stop groups when the migration has not been applied", async () => {
+    const order = vi.fn().mockResolvedValue({
+      data: null,
+      error: {
+        code: "PGRST205",
+        message: "Could not find the table 'public.trade_stop_groups'",
+      },
+    });
+    const inFilter = vi.fn(() => ({ order }));
+    const eq = vi.fn(() => ({ in: inFilter }));
+    const select = vi.fn(() => ({ eq }));
+    const from = vi.fn(() => ({ select }));
+
+    await expect(
+      loadStopGroupRows({
+        client: { from },
+        userId: "user-1",
+        tradeIds: ["trade-1"],
+      }),
+    ).resolves.toEqual([]);
   });
 });
 
@@ -126,6 +397,93 @@ describe("getTradeHistory", () => {
 });
 
 describe("getTradeDetail", () => {
+  it("loads editable stop groups for open trades", async () => {
+    const tradeSecondEq = vi.fn(() => ({
+      maybeSingle: vi.fn().mockResolvedValue({
+        data: {
+          id: "trade-1",
+          account_id: "account-1",
+          symbol: "DOCN",
+          direction: "LONG",
+          status: "OPEN",
+          opened_at: "2026-05-01T14:30:00.000Z",
+          closed_at: null,
+          entry_quantity: 10,
+          max_abs_quantity: 10,
+          avg_entry_price: 102,
+          avg_exit_price: null,
+          realized_pnl: null,
+          total_fees: 2,
+        },
+        error: null,
+      }),
+    }));
+    const tradeFirstEq = vi.fn(() => ({ eq: tradeSecondEq }));
+    const tradeSelect = vi.fn(() => ({ eq: tradeFirstEq }));
+
+    const tradeFillsOrder = vi.fn().mockResolvedValue({ data: [], error: null });
+    const tradeFillsSecondEq = vi.fn(() => ({ order: tradeFillsOrder }));
+    const tradeFillsFirstEq = vi.fn(() => ({ eq: tradeFillsSecondEq }));
+    const tradeFillsSelect = vi.fn(() => ({ eq: tradeFillsFirstEq }));
+
+    const stopGroupsOrder = vi.fn().mockResolvedValue({
+      data: [
+        {
+          id: "group-1",
+          trade_id: "trade-1",
+          account_id: "account-1",
+          symbol: "DOCN",
+          direction: "LONG",
+          entry_date: "2026-05-01",
+          quantity: 4,
+          avg_entry_price: 102,
+          stop_loss_price: 98.25,
+        },
+      ],
+      error: null,
+    });
+    const stopGroupsTradeIn = vi.fn(() => ({ order: stopGroupsOrder }));
+    const stopGroupsUserEq = vi.fn(() => ({ in: stopGroupsTradeIn }));
+    const stopGroupsSelect = vi.fn(() => ({ eq: stopGroupsUserEq }));
+
+    const from = vi.fn((table: string) => {
+      if (table === "trades") {
+        return { select: tradeSelect };
+      }
+      if (table === "trade_fills") {
+        return { select: tradeFillsSelect };
+      }
+      if (table === "trade_stop_groups") {
+        return { select: stopGroupsSelect };
+      }
+
+      throw new Error(`Unexpected table ${table}`);
+    });
+
+    await expect(
+      getTradeDetail("user-1", "trade-1", {
+        client: { from },
+        marketDataProvider: null,
+      }),
+    ).resolves.toMatchObject({
+      id: "trade-1",
+      stopGroups: [
+        {
+          id: "group-1",
+          tradeId: "trade-1",
+          entryDate: "2026-05-01",
+          quantity: 4,
+          stopLossPrice: 98.25,
+          stopUnrealizedPnl: -15,
+        },
+      ],
+    });
+
+    expect(stopGroupsSelect).toHaveBeenCalledWith("*");
+    expect(stopGroupsUserEq).toHaveBeenCalledWith("user_id", "user-1");
+    expect(stopGroupsTradeIn).toHaveBeenCalledWith("trade_id", ["trade-1"]);
+  });
+
   it("loads the trade summary with allocated fills for analysis", async () => {
     const tradeSecondEq = vi.fn(() => ({
       maybeSingle: vi.fn().mockResolvedValue({

@@ -11,6 +11,9 @@ import {
   buildTradeZeroPortfolioSnapshot,
   buildTradeZeroPositionSnapshot,
 } from "@/lib/tradezero/snapshot";
+import { getCachedOrFetchBars } from "@/lib/market-data/cache";
+import { createMassiveMarketDataProvider } from "@/lib/market-data/massive";
+import type { MarketDataProvider } from "@/lib/market-data/types";
 import { reconstructTrades } from "@/lib/trades/reconstruct";
 import type { CanonicalFill } from "@/lib/trades/types";
 import { createSupabaseAdminClient } from "@/lib/supabase/server";
@@ -48,7 +51,7 @@ type RebuildTradeClient = {
     };
   };
   from(table: "trades"): {
-    delete(): {
+    select(columns: "id,reconstruction_key"): {
       eq(column: "user_id", value: string): {
         in(column: "account_id", values: string[]): {
           gte(column: "opened_at", value: string): {
@@ -56,10 +59,21 @@ type RebuildTradeClient = {
               column: "opened_at",
               value: string,
             ): Promise<{
+              data: Record<string, unknown>[] | null;
               error: unknown;
             }>;
           };
         };
+      };
+    };
+    delete(): {
+      eq(column: "user_id", value: string): {
+        in(
+          column: "id",
+          values: string[],
+        ): Promise<{
+          error: unknown;
+        }>;
       };
     };
     upsert(
@@ -73,10 +87,53 @@ type RebuildTradeClient = {
     };
   };
   from(table: "trade_fills"): {
+    delete(): {
+      eq(column: "user_id", value: string): {
+        in(
+          column: "trade_id",
+          values: string[],
+        ): Promise<{
+          error: unknown;
+        }>;
+      };
+    };
     insert(values: Record<string, unknown>[]): Promise<{
       error: unknown;
     }>;
   };
+  from(table: "trade_stop_groups"): {
+    delete(): {
+      eq(column: "user_id", value: string): {
+        in(
+          column: "reconstruction_key",
+          values: string[],
+        ): Promise<{
+          error: unknown;
+        }>;
+      };
+    };
+    select(columns: "reconstruction_key,entry_date,stop_loss_price"): {
+      eq(column: "user_id", value: string): {
+        in(
+          column: "reconstruction_key",
+          values: string[],
+        ): Promise<{
+          data: Record<string, unknown>[] | null;
+          error: unknown;
+        }>;
+      };
+    };
+    upsert(
+      values: Record<string, unknown>[],
+      options: { onConflict: string },
+    ): Promise<{ error: unknown }>;
+  };
+};
+
+type CurrentBrokerPosition = {
+  accountId: string;
+  symbol: string;
+  quantity: number;
 };
 
 const IGNORED_OPEN_DECEMBER_TRADE_SYMBOLS = new Set(["UGL", "AGQ", "ERO", "ROIV"]);
@@ -119,6 +176,7 @@ export async function runTradeZeroSync(input: SyncInput) {
 
     const normalizedFills: CanonicalFill[] = [];
     const accountIds: string[] = [];
+    const currentPositions: CurrentBrokerPosition[] = [];
 
     for (const accountPayload of accounts) {
       const brokerAccountId = getTradeZeroAccountId(accountPayload);
@@ -148,6 +206,13 @@ export async function runTradeZeroSync(input: SyncInput) {
       const positions = await tradeZero.listPositions(brokerAccountId);
       const positionSnapshots = positions.map((position) =>
         buildTradeZeroPositionSnapshot({ pnl, position }),
+      );
+      currentPositions.push(
+        ...positionSnapshots.map((positionSnapshot) => ({
+          accountId,
+          symbol: positionSnapshot.symbol,
+          quantity: positionSnapshot.quantity,
+        })),
       );
       const portfolioSnapshot = buildTradeZeroPortfolioSnapshot({
         pnl,
@@ -249,6 +314,7 @@ export async function runTradeZeroSync(input: SyncInput) {
       accountIds,
       fromDate: input.fromDate,
       toDate: input.toDate,
+      positionSnapshots: currentPositions,
     });
     await recordTradeZeroSyncSucceeded(input, { client: supabase, id: jobRun?.id });
 
@@ -264,10 +330,13 @@ export async function runTradeZeroSync(input: SyncInput) {
 
 export async function replaceReconstructedTrades(input: {
   client?: unknown;
+  marketDataClient?: unknown;
+  marketDataProvider?: MarketDataProvider | null;
   userId: string;
   accountIds: string[];
   fromDate: string;
   toDate: string;
+  positionSnapshots?: CurrentBrokerPosition[];
 }) {
   if (input.accountIds.length === 0) {
     return;
@@ -294,42 +363,66 @@ export async function replaceReconstructedTrades(input: {
   }
 
   const fills = ((data ?? []) as Record<string, unknown>[]).map(storedFillToCanonicalFill);
-  const deleteResult = await client
-    .from("trades")
-    .delete()
-    .eq("user_id", input.userId)
-    .in("account_id", input.accountIds)
-    .gte("opened_at", `${input.fromDate}T00:00:00.000Z`)
-    .lt("opened_at", nextDate(input.toDate));
-
-  if (deleteResult.error) {
-    throw deleteResult.error;
-  }
-
   const trades = reconstructTrades(fills).filter(shouldPersistReconstructedTrade);
+  const existingStopGroups = await loadExistingStopGroups({
+    client,
+    trades,
+    userId: input.userId,
+  });
+  const existingTrades = await loadExistingRebuiltTrades({
+    client,
+    userId: input.userId,
+    accountIds: input.accountIds,
+    fromDate: input.fromDate,
+    toDate: input.toDate,
+  });
+  await deleteStaleRebuiltTrades({
+    client,
+    existingTrades,
+    reconstructedTrades: trades,
+    userId: input.userId,
+  });
+
   if (trades.length === 0) {
     return;
   }
+  const marketDataClient = input.marketDataClient ?? client;
+  const marketDataProvider =
+    input.marketDataProvider === undefined
+      ? createMassiveMarketDataProvider()
+      : input.marketDataProvider;
+  const stopDefaults = await getStopDefaultsForOpenTrades({
+    client: marketDataClient,
+    provider: marketDataProvider,
+    trades,
+  });
 
   const upsertResult = await client.from("trades").upsert(
-    trades.map((trade) => ({
-      user_id: trade.userId,
-      account_id: trade.accountId,
-      reconstruction_key: trade.id,
-      symbol: trade.symbol,
-      asset_class: trade.assetClass,
-      direction: trade.direction,
-      opened_at: trade.openedAt,
-      closed_at: trade.closedAt,
-      status: trade.status,
-      entry_quantity: trade.entryQuantity,
-      max_abs_quantity: trade.maxAbsQuantity,
-      avg_entry_price: trade.avgEntryPrice,
-      avg_exit_price: trade.avgExitPrice,
-      realized_pnl: trade.realizedPnl,
-      total_fees: trade.totalFees,
-      reconstruction_version: trade.reconstructionVersion,
-    })),
+    trades.map((trade) => {
+      const stop = stopDefaults.get(trade.id);
+
+      return {
+        user_id: trade.userId,
+        account_id: trade.accountId,
+        reconstruction_key: trade.id,
+        symbol: trade.symbol,
+        asset_class: trade.assetClass,
+        direction: trade.direction,
+        opened_at: trade.openedAt,
+        closed_at: trade.closedAt,
+        status: trade.status,
+        entry_quantity: trade.entryQuantity,
+        max_abs_quantity: trade.maxAbsQuantity,
+        avg_entry_price: trade.avgEntryPrice,
+        avg_exit_price: trade.avgExitPrice,
+        realized_pnl: trade.realizedPnl,
+        total_fees: trade.totalFees,
+        initial_stop_price: stop?.price ?? null,
+        initial_risk_per_share: stop?.riskPerShare ?? null,
+        initial_risk_amount: stop?.riskAmount ?? null,
+        reconstruction_version: trade.reconstructionVersion,
+      };
+    }),
     { onConflict: "user_id,reconstruction_key" },
   ).select("id,reconstruction_key");
 
@@ -359,6 +452,12 @@ export async function replaceReconstructedTrades(input: {
     }));
   });
 
+  await deleteTradeFillRows({
+    client,
+    tradeIds: [...tradeIdByReconstructionKey.values()],
+    userId: input.userId,
+  });
+
   if (tradeFillRows.length > 0) {
     const tradeFillResult = await client.from("trade_fills").insert(tradeFillRows);
 
@@ -366,6 +465,489 @@ export async function replaceReconstructedTrades(input: {
       throw tradeFillResult.error;
     }
   }
+
+  await upsertTradeStopGroups({
+    client,
+    marketDataClient,
+    marketDataProvider,
+    trades,
+    fills,
+    positionSnapshots: input.positionSnapshots ?? [],
+    tradeIdByReconstructionKey,
+    existingStopGroups,
+    userId: input.userId,
+  });
+}
+
+async function loadExistingRebuiltTrades(input: {
+  client: RebuildTradeClient;
+  userId: string;
+  accountIds: string[];
+  fromDate: string;
+  toDate: string;
+}) {
+  const result = await input.client
+    .from("trades")
+    .select("id,reconstruction_key")
+    .eq("user_id", input.userId)
+    .in("account_id", input.accountIds)
+    .gte("opened_at", `${input.fromDate}T00:00:00.000Z`)
+    .lt("opened_at", nextDate(input.toDate));
+
+  if (result.error) {
+    throw result.error;
+  }
+
+  return result.data ?? [];
+}
+
+async function deleteStaleRebuiltTrades(input: {
+  client: RebuildTradeClient;
+  existingTrades: Record<string, unknown>[];
+  reconstructedTrades: ReturnType<typeof reconstructTrades>;
+  userId: string;
+}) {
+  const reconstructedKeys = new Set(input.reconstructedTrades.map((trade) => trade.id));
+  const staleTradeIds = input.existingTrades
+    .filter((trade) => !reconstructedKeys.has(String(trade.reconstruction_key)))
+    .map((trade) => String(trade.id));
+
+  if (staleTradeIds.length === 0) {
+    return;
+  }
+
+  const deleteResult = await input.client
+    .from("trades")
+    .delete()
+    .eq("user_id", input.userId)
+    .in("id", staleTradeIds);
+
+  if (deleteResult.error) {
+    throw deleteResult.error;
+  }
+}
+
+async function deleteTradeFillRows(input: {
+  client: RebuildTradeClient;
+  tradeIds: string[];
+  userId: string;
+}) {
+  if (input.tradeIds.length === 0) {
+    return;
+  }
+
+  const deleteResult = await input.client
+    .from("trade_fills")
+    .delete()
+    .eq("user_id", input.userId)
+    .in("trade_id", input.tradeIds);
+
+  if (deleteResult.error) {
+    throw deleteResult.error;
+  }
+}
+
+async function loadExistingStopGroups(input: {
+  client: RebuildTradeClient;
+  trades: ReturnType<typeof reconstructTrades>;
+  userId: string;
+}) {
+  const reconstructionKeys = input.trades
+    .filter((trade) => trade.status === "OPEN")
+    .map((trade) => trade.id);
+
+  if (reconstructionKeys.length === 0) {
+    return new Map<string, number | null>();
+  }
+
+  const result = await input.client
+    .from("trade_stop_groups")
+    .select("reconstruction_key,entry_date,stop_loss_price")
+    .eq("user_id", input.userId)
+    .in("reconstruction_key", reconstructionKeys);
+
+  if (result.error) {
+    if (isMissingStopGroupsTableError(result.error)) {
+      return new Map<string, number | null>();
+    }
+
+    throw result.error;
+  }
+
+  return new Map(
+    (result.data ?? []).map((row) => [
+      `${String(row.reconstruction_key)}:${String(row.entry_date)}`,
+      numberFrom(row, ["stop_loss_price"]) ?? null,
+    ]),
+  );
+}
+
+async function upsertTradeStopGroups(input: {
+  client: RebuildTradeClient;
+  marketDataClient: unknown;
+  marketDataProvider: MarketDataProvider | null;
+  trades: ReturnType<typeof reconstructTrades>;
+  fills: CanonicalFill[];
+  positionSnapshots: CurrentBrokerPosition[];
+  tradeIdByReconstructionKey: Map<string, string>;
+  existingStopGroups: Map<string, number | null>;
+  userId: string;
+}) {
+  const openReconstructionKeys = input.trades
+    .filter((trade) => trade.status === "OPEN")
+    .map((trade) => trade.id);
+
+  if (openReconstructionKeys.length === 0) {
+    return;
+  }
+
+  const deleteExistingResult = await input.client
+    .from("trade_stop_groups")
+    .delete()
+    .eq("user_id", input.userId)
+    .in("reconstruction_key", openReconstructionKeys);
+
+  if (deleteExistingResult.error) {
+    if (isMissingStopGroupsTableError(deleteExistingResult.error)) {
+      return;
+    }
+
+    throw deleteExistingResult.error;
+  }
+
+  const groups = buildOpenEntryStopGroups({
+    trades: input.trades,
+    fills: input.fills,
+    positionSnapshots: input.positionSnapshots,
+    tradeIdByReconstructionKey: input.tradeIdByReconstructionKey,
+  });
+
+  if (groups.length === 0) {
+    return;
+  }
+
+  const defaults = await getStopDefaultsForEntryGroups({
+    client: input.marketDataClient,
+    provider: input.marketDataProvider,
+    groups,
+  });
+
+  const upsertResult = await input.client.from("trade_stop_groups").upsert(
+    groups.map((group) => {
+      const existingStop = input.existingStopGroups.get(
+        `${group.reconstructionKey}:${group.entryDate}`,
+      );
+      const defaultStop = defaults.get(group.key);
+      const stopLossPrice = existingStop ?? defaultStop?.price ?? null;
+      const riskPerShare =
+        stopLossPrice == null
+          ? null
+          : group.direction === "SHORT"
+            ? roundMoney(stopLossPrice - group.avgEntryPrice)
+            : roundMoney(group.avgEntryPrice - stopLossPrice);
+
+      return {
+        user_id: group.userId,
+        trade_id: group.tradeId,
+        reconstruction_key: group.reconstructionKey,
+        account_id: group.accountId,
+        symbol: group.symbol,
+        direction: group.direction,
+        entry_date: group.entryDate,
+        quantity: group.quantity,
+        avg_entry_price: group.avgEntryPrice,
+        stop_loss_price: stopLossPrice,
+        risk_per_share: riskPerShare,
+        risk_amount: riskPerShare == null ? null : roundMoney(riskPerShare * group.quantity),
+        updated_at: new Date().toISOString(),
+      };
+    }),
+    { onConflict: "user_id,reconstruction_key,entry_date" },
+  );
+
+  if (upsertResult.error) {
+    if (isMissingStopGroupsTableError(upsertResult.error)) {
+      return;
+    }
+
+    throw upsertResult.error;
+  }
+}
+
+function isMissingStopGroupsTableError(error: unknown) {
+  if (!error || typeof error !== "object") {
+    return false;
+  }
+
+  const payload = error as { code?: unknown; message?: unknown };
+
+  return (
+    payload.code === "PGRST205" &&
+    typeof payload.message === "string" &&
+    payload.message.includes("trade_stop_groups")
+  );
+}
+
+function buildOpenEntryStopGroups(input: {
+  trades: ReturnType<typeof reconstructTrades>;
+  fills: CanonicalFill[];
+  positionSnapshots?: CurrentBrokerPosition[];
+  tradeIdByReconstructionKey: Map<string, string>;
+}) {
+  const fillsById = new Map(input.fills.map((fill) => [fill.id, fill]));
+  const groups = new Map<
+    string,
+    {
+      key: string;
+      userId: string;
+      tradeId: string;
+      reconstructionKey: string;
+      accountId: string;
+      symbol: string;
+      direction: string;
+      entryDate: string;
+      quantity: number;
+      notional: number;
+      avgEntryPrice: number;
+    }
+  >();
+
+  for (const trade of input.trades.filter((candidate) => candidate.status === "OPEN")) {
+    const tradeId = input.tradeIdByReconstructionKey.get(trade.id);
+    if (!tradeId) {
+      continue;
+    }
+
+    const lots: Array<{
+      groupKey: string;
+      remainingQuantity: number;
+      price: number;
+    }> = [];
+
+    for (const allocation of trade.allocations) {
+      const fill = fillsById.get(allocation.fillId);
+      if (!fill) {
+        continue;
+      }
+
+      if (allocation.allocationRole === "ENTRY") {
+        const entryDate = fill.tradeDate;
+        const key = `${trade.id}:${entryDate}`;
+        const group =
+          groups.get(key) ??
+          {
+            key,
+            userId: trade.userId,
+            tradeId,
+            reconstructionKey: trade.id,
+            accountId: trade.accountId,
+            symbol: trade.symbol,
+            direction: trade.direction,
+            entryDate,
+            quantity: 0,
+            notional: 0,
+            avgEntryPrice: 0,
+          };
+
+        group.quantity += allocation.allocatedQuantity;
+        group.notional += allocation.allocatedQuantity * allocation.allocationPrice;
+        group.avgEntryPrice = roundMoney(group.notional / group.quantity);
+        groups.set(key, group);
+        lots.push({
+          groupKey: key,
+          remainingQuantity: allocation.allocatedQuantity,
+          price: allocation.allocationPrice,
+        });
+        continue;
+      }
+
+      let remainingExitQuantity = allocation.allocatedQuantity;
+
+      for (const lot of lots) {
+        if (remainingExitQuantity <= 0) {
+          break;
+        }
+        if (lot.remainingQuantity <= 0) {
+          continue;
+        }
+
+        const closedQuantity = Math.min(lot.remainingQuantity, remainingExitQuantity);
+        const group = groups.get(lot.groupKey);
+
+        if (group) {
+          group.quantity -= closedQuantity;
+          group.notional -= closedQuantity * lot.price;
+          group.avgEntryPrice =
+            group.quantity > 0 ? roundMoney(group.notional / group.quantity) : 0;
+        }
+
+        lot.remainingQuantity -= closedQuantity;
+        remainingExitQuantity -= closedQuantity;
+      }
+    }
+  }
+
+  return capGroupsToBrokerPositions(
+    [...groups.values()]
+      .filter((group) => group.quantity > 0.000001)
+      .map((group) => ({
+        ...group,
+        quantity: roundMoney(group.quantity),
+        notional: roundMoney(group.notional),
+        avgEntryPrice: roundMoney(group.notional / group.quantity),
+      })),
+    input.positionSnapshots ?? [],
+  );
+}
+
+function capGroupsToBrokerPositions(
+  groups: Array<{
+    key: string;
+    userId: string;
+    tradeId: string;
+    reconstructionKey: string;
+    accountId: string;
+    symbol: string;
+    direction: string;
+    entryDate: string;
+    quantity: number;
+    notional: number;
+    avgEntryPrice: number;
+  }>,
+  positions: CurrentBrokerPosition[],
+) {
+  if (positions.length === 0) {
+    return groups;
+  }
+
+  const remainingByPosition = new Map(
+    positions.map((position) => [
+      `${position.accountId}:${position.symbol}`,
+      Math.abs(position.quantity),
+    ]),
+  );
+
+  return groups
+    .sort((left, right) => left.entryDate.localeCompare(right.entryDate))
+    .map((group) => {
+      const positionKey = `${group.accountId}:${group.symbol}`;
+      const remainingQuantity = remainingByPosition.get(positionKey);
+
+      if (remainingQuantity == null) {
+        return group;
+      }
+
+      const quantity = Math.min(group.quantity, remainingQuantity);
+      remainingByPosition.set(positionKey, Math.max(remainingQuantity - quantity, 0));
+
+      return {
+        ...group,
+        quantity: roundMoney(quantity),
+        notional: roundMoney(group.avgEntryPrice * quantity),
+      };
+    })
+    .filter((group) => group.quantity > 0.000001)
+    .sort((left, right) => left.key.localeCompare(right.key));
+}
+
+async function getStopDefaultsForEntryGroups(input: {
+  client: unknown;
+  provider: MarketDataProvider | null;
+  groups: ReturnType<typeof buildOpenEntryStopGroups>;
+}) {
+  const stops = new Map<string, { price: number }>();
+
+  if (!input.provider) {
+    return stops;
+  }
+
+  await Promise.all(
+    input.groups.map(async (group) => {
+      try {
+        const bars = await getCachedOrFetchBars({
+          client: input.client,
+          provider: input.provider as MarketDataProvider,
+          request: {
+            symbol: group.symbol,
+            timeframe: "1d",
+            from: group.entryDate,
+            to: group.entryDate,
+            adjusted: false,
+          },
+        });
+        const entryDay = bars[0];
+
+        if (!entryDay) {
+          return;
+        }
+
+        stops.set(group.key, {
+          price: roundMoney(group.direction === "SHORT" ? entryDay.high : entryDay.low),
+        });
+      } catch {
+        // Missing market data should not block broker sync.
+      }
+    }),
+  );
+
+  return stops;
+}
+
+async function getStopDefaultsForOpenTrades(input: {
+  client: unknown;
+  provider: MarketDataProvider | null;
+  trades: ReturnType<typeof reconstructTrades>;
+}) {
+  const stops = new Map<
+    string,
+    { price: number; riskPerShare: number; riskAmount: number }
+  >();
+
+  if (!input.provider) {
+    return stops;
+  }
+
+  await Promise.all(
+    input.trades
+      .filter((trade) => trade.status === "OPEN")
+      .map(async (trade) => {
+        try {
+          const entryDate = trade.openedAt.slice(0, 10);
+          const bars = await getCachedOrFetchBars({
+            client: input.client,
+            provider: input.provider as MarketDataProvider,
+            request: {
+              symbol: trade.symbol,
+              timeframe: "1d",
+              from: entryDate,
+              to: entryDate,
+              adjusted: false,
+            },
+          });
+          const entryDay = bars[0];
+
+          if (!entryDay) {
+            return;
+          }
+
+          const price = trade.direction === "SHORT" ? entryDay.high : entryDay.low;
+          const riskPerShare =
+            trade.direction === "SHORT"
+              ? price - trade.avgEntryPrice
+              : trade.avgEntryPrice - price;
+
+          stops.set(trade.id, {
+            price: roundMoney(price),
+            riskPerShare: roundMoney(riskPerShare),
+            riskAmount: roundMoney(riskPerShare * trade.maxAbsQuantity),
+          });
+        } catch {
+          // Missing market data should not block broker sync.
+        }
+      }),
+  );
+
+  return stops;
 }
 
 function shouldPersistReconstructedTrade(trade: ReturnType<typeof reconstructTrades>[number]) {
@@ -413,6 +995,10 @@ function nextDate(date: string) {
   const parsed = new Date(`${date}T00:00:00.000Z`);
   parsed.setUTCDate(parsed.getUTCDate() + 1);
   return parsed.toISOString();
+}
+
+function roundMoney(value: number) {
+  return Math.round((value + Number.EPSILON) * 10000) / 10000;
 }
 
 function numberFrom(

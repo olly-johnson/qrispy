@@ -5,8 +5,13 @@ import {
   MARKER_OPTIONS,
   MARKER_SIZE,
   PRICE_LINE_DISABLED_OPTIONS,
+  STOP_LINE_COLOR,
+  STOP_LINE_OPACITY,
+  STOP_PRICE_LINE_STYLE,
   prepareChartData,
+  prepareStopPriceLines,
 } from "./trade-chart-panel";
+import { LineStyle } from "lightweight-charts";
 import type { TradeChartDataset } from "@/lib/market-data/trade-charts";
 
 describe("prepareChartData", () => {
@@ -54,6 +59,58 @@ describe("prepareChartData", () => {
       }),
     ]);
   });
+
+  it("keeps stop-loss lines out of indicator overlays", () => {
+    const prepared = prepareChartData({
+      id: "daily",
+      label: "Daily",
+      timeframe: "1d",
+      bars: [
+        bar("2026-05-01T00:00:00.000Z", 100),
+        bar("2026-05-02T00:00:00.000Z", 102),
+      ],
+      overlays: [],
+      markers: [],
+    } satisfies TradeChartDataset);
+
+    expect(prepared.overlays).toEqual([]);
+  });
+});
+
+describe("prepareStopPriceLines", () => {
+  it("uses draggable dashed 50% transparent price-line options for stop losses", () => {
+    expect(
+      prepareStopPriceLines(
+      [
+        {
+          id: "group-1",
+          tradeId: "trade-1",
+          entryDate: "2026-05-01",
+          direction: "LONG",
+          quantity: 4,
+          avgEntryPrice: 102,
+          stopLossPrice: 98.25,
+          stopUnrealizedPnl: -15,
+        },
+      ],
+      ),
+    ).toContainEqual(
+      expect.objectContaining({
+        id: "group-1",
+        price: 98.25,
+        color: `rgba(${STOP_LINE_COLOR}, ${STOP_LINE_OPACITY})`,
+        lineStyle: STOP_PRICE_LINE_STYLE,
+        lineVisible: true,
+        axisLabelVisible: true,
+      }),
+    );
+  });
+});
+
+describe("STOP_PRICE_LINE_STYLE", () => {
+  it("uses the lightweight-charts dashed line style", () => {
+    expect(STOP_PRICE_LINE_STYLE).toBe(LineStyle.Dashed);
+  });
 });
 
 describe("PRICE_LINE_DISABLED_OPTIONS", () => {
@@ -77,3 +134,19 @@ describe("marker label visibility", () => {
     expect(CHART_FONT_SIZE).toBe(14);
   });
 });
+
+function bar(barStartAt: string, close: number) {
+  return {
+    provider: "massive",
+    symbol: "DOCN",
+    timeframe: "1d",
+    barStartAt,
+    open: close - 1,
+    high: close + 1,
+    low: close - 2,
+    close,
+    volume: 1000,
+    adjusted: false,
+    rawPayload: {},
+  };
+}
