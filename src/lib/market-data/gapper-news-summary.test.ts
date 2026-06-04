@@ -3,6 +3,7 @@ import { describe, expect, it, vi } from "vitest";
 import {
   batchSummarizeGapperNews,
   calculateChangePercent,
+  createOpenAiNewsSummaryProvider,
   renderGapperNewsSummary,
   resolveNewsSummaryModel,
   type ExtractedGapperNews,
@@ -137,6 +138,56 @@ describe("batchSummarizeGapperNews", () => {
     ]);
 
     expect(provider.extract).toHaveBeenCalledTimes(2);
+  });
+});
+
+describe("createOpenAiNewsSummaryProvider", () => {
+  it("calls the Responses API with strict JSON schema and article context", async () => {
+    const fetcher = vi.fn().mockResolvedValue(
+      new Response(
+        JSON.stringify({
+          output_text: JSON.stringify(emptyExtracted()),
+        }),
+        { status: 200 },
+      ),
+    );
+    const provider = createOpenAiNewsSummaryProvider({
+      apiKey: "openai-key",
+      fetcher,
+    });
+
+    await provider.extract({
+      model: "gpt-4o-mini",
+      news: [
+        {
+          articleUrl: "https://example.com/acme",
+          description: "Acme reported adjusted EPS of $0.12.",
+          id: "article-1",
+          publishedUtc: "2026-06-04T11:00:00.000Z",
+          tickers: ["ACME"],
+          title: "Acme earnings",
+        },
+      ],
+      previousCloseAt: "2026-06-03T20:00:00.000Z",
+      symbol: "ACME",
+    });
+
+    expect(fetcher).toHaveBeenCalledWith(
+      "https://api.openai.com/v1/responses",
+      expect.objectContaining({
+        headers: expect.objectContaining({
+          authorization: "Bearer openai-key",
+          "content-type": "application/json",
+        }),
+        method: "POST",
+      }),
+    );
+    const body = JSON.parse(fetcher.mock.calls[0][1].body);
+    expect(body.model).toBe("gpt-4o-mini");
+    expect(body.text.format.type).toBe("json_schema");
+    expect(body.text.format.strict).toBe(true);
+    expect(JSON.stringify(body)).toContain("Do not infer missing numbers");
+    expect(JSON.stringify(body)).toContain("Acme earnings");
   });
 });
 

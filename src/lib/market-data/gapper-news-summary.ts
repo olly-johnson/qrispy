@@ -118,6 +118,71 @@ export async function batchSummarizeGapperNews({
   );
 }
 
+export function createOpenAiNewsSummaryProvider({
+  apiKey,
+  fetcher = fetch,
+}: {
+  apiKey: string;
+  fetcher?: typeof fetch;
+}): NewsSummaryProvider {
+  return {
+    async extract(input) {
+      const response = await fetcher("https://api.openai.com/v1/responses", {
+        body: JSON.stringify({
+          input: [
+            {
+              content: [
+                {
+                  text: [
+                    "Extract market-moving news catalysts as JSON.",
+                    "Use only the supplied news articles.",
+                    "Do not infer missing numbers.",
+                    "Return null for unavailable numeric or guidance fields.",
+                    `Symbol: ${input.symbol}`,
+                    `Previous close cutoff: ${input.previousCloseAt}`,
+                    `Articles: ${JSON.stringify(input.news)}`,
+                  ].join("\n"),
+                  type: "input_text",
+                },
+              ],
+              role: "user",
+            },
+          ],
+          model: input.model,
+          text: {
+            format: {
+              name: "gapper_news_summary",
+              schema: NEWS_SUMMARY_JSON_SCHEMA,
+              strict: true,
+              type: "json_schema",
+            },
+          },
+        }),
+        headers: {
+          authorization: `Bearer ${apiKey}`,
+          "content-type": "application/json",
+        },
+        method: "POST",
+      });
+
+      if (!response.ok) {
+        throw new Error(
+          `OpenAI news summary request failed with ${response.status}`,
+        );
+      }
+
+      const payload = await response.json();
+      const outputText = extractOpenAiResponseText(payload);
+
+      if (!outputText) {
+        throw new Error("OpenAI news summary response did not include text output");
+      }
+
+      return JSON.parse(outputText) as ExtractedGapperNews;
+    },
+  };
+}
+
 export function renderGapperNewsSummary(
   extracted: ExtractedGapperNews & {
     sources: Array<{
@@ -158,6 +223,89 @@ export function renderGapperNewsSummary(
     "Sources:",
     sources,
   ].join("\n");
+}
+
+const nullableNumber = { anyOf: [{ type: "number" }, { type: "null" }] };
+const nullableString = { anyOf: [{ type: "string" }, { type: "null" }] };
+
+const NEWS_SUMMARY_JSON_SCHEMA = {
+  additionalProperties: false,
+  properties: {
+    catalysts: {
+      items: {
+        additionalProperties: false,
+        properties: {
+          sourceIds: { items: { type: "string" }, type: "array" },
+          summary: { type: "string" },
+          type: { type: "string" },
+        },
+        required: ["sourceIds", "summary", "type"],
+        type: "object",
+      },
+      type: "array",
+    },
+    earnings: {
+      additionalProperties: false,
+      properties: {
+        adjustedEps: metricSchema(),
+        revenue: metricSchema(),
+      },
+      required: ["adjustedEps", "revenue"],
+      type: "object",
+    },
+    fullYearGuidance: guidanceSchema(),
+    nextQuarterGuidance: guidanceSchema(),
+    notableNews: { items: { type: "string" }, type: "array" },
+  },
+  required: [
+    "catalysts",
+    "earnings",
+    "fullYearGuidance",
+    "nextQuarterGuidance",
+    "notableNews",
+  ],
+  type: "object",
+};
+
+function metricSchema() {
+  return {
+    additionalProperties: false,
+    properties: {
+      actual: nullableNumber,
+      estimate: nullableNumber,
+      priorYear: nullableNumber,
+    },
+    required: ["actual", "estimate", "priorYear"],
+    type: "object",
+  };
+}
+
+function guidanceSchema() {
+  return {
+    additionalProperties: false,
+    properties: {
+      eps: nullableString,
+      revenue: nullableString,
+    },
+    required: ["eps", "revenue"],
+    type: "object",
+  };
+}
+
+function extractOpenAiResponseText(payload: unknown) {
+  const row = payload as {
+    output?: Array<{ content?: Array<{ text?: string; type?: string }> }>;
+    output_text?: string;
+  };
+
+  if (typeof row.output_text === "string") {
+    return row.output_text;
+  }
+
+  return row.output
+    ?.flatMap((item) => item.content ?? [])
+    .map((content) => content.text)
+    .find((text): text is string => typeof text === "string" && text.length > 0);
 }
 
 function formatCurrency(value: number | null, decimals: number) {
