@@ -1,5 +1,13 @@
 import Link from "next/link";
-import { Activity, BarChart3, BriefcaseBusiness, ListChecks, Settings, WalletCards } from "lucide-react";
+import {
+  Activity,
+  BarChart3,
+  BriefcaseBusiness,
+  ListChecks,
+  Settings,
+  TrendingUp,
+  WalletCards,
+} from "lucide-react";
 
 import type { AppUser } from "@/lib/auth/session";
 
@@ -7,6 +15,7 @@ const navItems = [
   { href: "/dashboard", label: "Dashboard", icon: WalletCards },
   { href: "/trades", label: "Trades", icon: BarChart3 },
   { href: "/positions", label: "Positions", icon: BriefcaseBusiness },
+  { href: "/gappers", label: "Gappers", icon: TrendingUp },
   { href: "/market-breadth", label: "Breadth", icon: Activity },
   { href: "/jobs", label: "Jobs", icon: ListChecks },
   { href: "/settings", label: "Settings", icon: Settings },
