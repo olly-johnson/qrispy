@@ -18,6 +18,14 @@ export type MassiveConfig = {
   baseUrl: string;
 };
 
+export type NewsSummaryLlmProvider = "openai";
+
+export type NewsSummaryLlmConfig = {
+  apiKey: string;
+  model: string;
+  provider: NewsSummaryLlmProvider;
+};
+
 export function getPublicSupabaseConfig(): PublicSupabaseConfig | null {
   const url = process.env.NEXT_PUBLIC_SUPABASE_URL;
   const anonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
@@ -74,6 +82,27 @@ export function getMassiveConfig(): MassiveConfig | null {
   return {
     apiKey,
     baseUrl: baseUrl.replace(/\/$/, ""),
+  };
+}
+
+export function getNewsSummaryLlmConfig(): NewsSummaryLlmConfig | null {
+  const provider = (
+    process.env.NEWS_SUMMARY_LLM_PROVIDER ?? "openai"
+  ).toLowerCase();
+
+  if (provider !== "openai") {
+    return null;
+  }
+
+  const apiKey = process.env.OPENAI_API_KEY;
+  if (!apiKey) {
+    return null;
+  }
+
+  return {
+    apiKey,
+    model: process.env.NEWS_SUMMARY_LLM_MODEL ?? "gpt-4o-mini",
+    provider: "openai",
   };
 }
 
