@@ -1,6 +1,10 @@
 import { describe, expect, it } from "vitest";
 
-import { DEFAULT_GAPPERS_FILTERS, filterGappersRows } from "./gappers-client";
+import {
+  buildGappersSummaryRequests,
+  DEFAULT_GAPPERS_FILTERS,
+  filterGappersRows,
+} from "./gappers-client";
 import type { GappersRow } from "./gappers";
 
 describe("filterGappersRows", () => {
@@ -38,6 +42,24 @@ describe("filterGappersRows", () => {
   });
 });
 
+describe("buildGappersSummaryRequests", () => {
+  it("builds summary API rows for selected visible symbols", () => {
+    const rows = [
+      row("ACME", "Stock", 1, 6, 100_000),
+      row("IETF", "ETF", 4, 8, 250_000),
+    ];
+
+    expect(
+      buildGappersSummaryRequests(rows, new Set(["IETF", "MISS"])),
+    ).toEqual([
+      {
+        previousCloseAt: "2026-06-03T20:00:00.000Z",
+        symbol: "IETF",
+      },
+    ]);
+  });
+});
+
 function row(
   symbol: string,
   securityType: GappersRow["securityType"],
@@ -52,6 +74,7 @@ function row(
     lastUpdatedAt: null,
     name: symbol,
     previousClose: 1,
+    previousCloseAt: "2026-06-03T20:00:00.000Z",
     price,
     securityType,
     symbol,

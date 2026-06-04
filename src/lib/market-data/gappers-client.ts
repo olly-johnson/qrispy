@@ -37,3 +37,15 @@ export function filterGappersRows(rows: GappersRow[], filters: GappersFilters) {
     return true;
   });
 }
+
+export function buildGappersSummaryRequests(
+  rows: GappersRow[],
+  selectedSymbols: Set<string>,
+) {
+  return rows
+    .filter((row) => selectedSymbols.has(row.symbol))
+    .map((row) => ({
+      previousCloseAt: row.previousCloseAt,
+      symbol: row.symbol,
+    }));
+}
