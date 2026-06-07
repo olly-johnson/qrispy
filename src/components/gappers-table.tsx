@@ -10,16 +10,17 @@ import {
   buildGappersSummaryRequests,
   DEFAULT_GAPPERS_FILTERS,
   filterGappersRows,
+  getCachedGappersSummaryResults,
+  getLastGappersSummaryResults,
+  saveGappersSummaryResults,
+  saveLastGappersSummaryResults,
   type GappersFilters,
+  type GappersNewsSummaryResult,
 } from "@/lib/market-data/gappers-client";
 
 const AUTO_REFRESH_MS = 15 * 60 * 1000;
+const NEWS_SUMMARY_CACHE_MAX_AGE_MS = 24 * 60 * 60 * 1000;
 const NEWS_SUMMARY_MODELS = ["gpt-4o-mini", "gpt-4o-2024-08-06"] as const;
-
-type NewsSummaryResult =
-  | { rendered: string; status: "success"; symbol: string }
-  | { message: string; status: "no_news"; symbol: string }
-  | { error: string; status: "error"; symbol: string };
 
 export function GappersTable({
   error,
@@ -39,7 +40,18 @@ export function GappersTable({
   const [newsProvider, setNewsProvider] = useState("openai");
   const [selectedSymbols, setSelectedSymbols] = useState<Set<string>>(() => new Set());
   const [summaryError, setSummaryError] = useState<string | null>(null);
-  const [summaryResults, setSummaryResults] = useState<NewsSummaryResult[]>([]);
+  const [summaryResults, setSummaryResults] = useState<GappersNewsSummaryResult[]>(
+    () => {
+      if (typeof window === "undefined") {
+        return [];
+      }
+
+      return getLastGappersSummaryResults({
+        maxAgeMs: NEWS_SUMMARY_CACHE_MAX_AGE_MS,
+        storage: window.localStorage,
+      });
+    },
+  );
   const [isPending, startTransition] = useTransition();
   const visibleRows = useMemo(() => filterGappersRows(rows, filters), [filters, rows]);
   const selectedVisibleRows = useMemo(
@@ -103,25 +115,60 @@ export function GappersTable({
     setSummaryError(null);
 
     try {
-      const response = await fetch("/api/gappers/news-summaries", {
-        body: JSON.stringify({
+      const { cachedResults, missingRequests } = getCachedGappersSummaryResults({
+        maxAgeMs: NEWS_SUMMARY_CACHE_MAX_AGE_MS,
+        model: newsModel,
+        provider: newsProvider,
+        requests: tickers,
+        storage: window.localStorage,
+      });
+
+      let fetchedResults: GappersNewsSummaryResult[] = [];
+
+      if (missingRequests.length > 0) {
+        const response = await fetch("/api/gappers/news-summaries", {
+          body: JSON.stringify({
+            model: newsModel,
+            provider: newsProvider,
+            tickers: missingRequests,
+          }),
+          headers: { "content-type": "application/json" },
+          method: "POST",
+        });
+        const payload = (await response.json()) as {
+          error?: string;
+          results?: GappersNewsSummaryResult[];
+        };
+
+        if (!response.ok) {
+          throw new Error(payload.error ?? "News summary request failed.");
+        }
+
+        fetchedResults = payload.results ?? [];
+        saveGappersSummaryResults({
           model: newsModel,
           provider: newsProvider,
-          tickers,
-        }),
-        headers: { "content-type": "application/json" },
-        method: "POST",
-      });
-      const payload = (await response.json()) as {
-        error?: string;
-        results?: NewsSummaryResult[];
-      };
-
-      if (!response.ok) {
-        throw new Error(payload.error ?? "News summary request failed.");
+          requests: missingRequests,
+          results: fetchedResults,
+          storage: window.localStorage,
+        });
       }
 
-      setSummaryResults(payload.results ?? []);
+      const resultsBySymbol = new Map(
+        [...cachedResults, ...fetchedResults].map((result) => [
+          result.symbol,
+          result,
+        ]),
+      );
+      const orderedResults = tickers
+        .map((ticker) => resultsBySymbol.get(ticker.symbol))
+        .filter((result): result is GappersNewsSummaryResult => result != null);
+
+      saveLastGappersSummaryResults({
+        results: orderedResults,
+        storage: window.localStorage,
+      });
+      setSummaryResults(orderedResults);
     } catch (error) {
       setSummaryError(error instanceof Error ? error.message : String(error));
     } finally {

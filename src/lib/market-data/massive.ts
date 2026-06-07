@@ -41,6 +41,11 @@ const TIMEFRAME_PATH: Record<MarketDataTimeframe, { multiplier: number; timespan
   "5m": { multiplier: 5, timespan: "minute" },
   "1h": { multiplier: 1, timespan: "hour" },
 };
+const ACTIVE_TICKERS_CACHE_TTL_MS = 6 * 60 * 60 * 1000;
+const activeTickerCache = new Map<
+  string,
+  { expiresAt: number; rows: MassiveReferenceTicker[] }
+>();
 
 export class MassiveMarketDataProvider implements MarketDataProvider {
   readonly name = "massive";
@@ -77,7 +82,20 @@ export class MassiveMarketDataProvider implements MarketDataProvider {
     url.searchParams.set("limit", "1000");
     url.searchParams.set("sort", "ticker");
 
-    return this.fetchPaginatedResults<MassiveReferenceTicker>(url);
+    const cacheKey = `${this.baseUrl}:${this.apiKey}:active-stock-tickers`;
+    const cached = activeTickerCache.get(cacheKey);
+
+    if (cached && cached.expiresAt > Date.now()) {
+      return cached.rows;
+    }
+
+    const rows = await this.fetchPaginatedResults<MassiveReferenceTicker>(url);
+    activeTickerCache.set(cacheKey, {
+      expiresAt: Date.now() + ACTIVE_TICKERS_CACHE_TTL_MS,
+      rows,
+    });
+
+    return rows;
   }
 
   async getFullMarketSnapshot(): Promise<MassiveSnapshotTicker[]> {

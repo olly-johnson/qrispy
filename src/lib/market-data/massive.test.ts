@@ -116,6 +116,39 @@ describe("MassiveMarketDataProvider", () => {
     expect(secondUrl.searchParams.get("apiKey")).toBe("massive-key");
   });
 
+  it("caches active stock reference tickers for repeated calls", async () => {
+    const fetcher = vi.fn().mockResolvedValue({
+      ok: true,
+      status: 200,
+      json: async () => ({
+        results: [
+          {
+            active: true,
+            locale: "us",
+            market: "stocks",
+            name: "Cached Corp",
+            ticker: "CACH",
+            type: "CS",
+          },
+        ],
+      }),
+    });
+    const provider = new MassiveMarketDataProvider({
+      apiKey: "cache-key",
+      baseUrl: "https://cache.massive.test",
+      fetcher,
+    });
+
+    await expect(provider.getActiveStockTickers()).resolves.toEqual([
+      expect.objectContaining({ ticker: "CACH" }),
+    ]);
+    await expect(provider.getActiveStockTickers()).resolves.toEqual([
+      expect.objectContaining({ ticker: "CACH" }),
+    ]);
+
+    expect(fetcher).toHaveBeenCalledTimes(1);
+  });
+
   it("fetches the full US stock market snapshot without OTC tickers", async () => {
     const fetcher = vi.fn().mockResolvedValue({
       ok: true,

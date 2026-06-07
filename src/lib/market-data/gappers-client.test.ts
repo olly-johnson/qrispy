@@ -2,8 +2,12 @@ import { describe, expect, it } from "vitest";
 
 import {
   buildGappersSummaryRequests,
+  getCachedGappersSummaryResults,
+  getLastGappersSummaryResults,
   DEFAULT_GAPPERS_FILTERS,
   filterGappersRows,
+  saveLastGappersSummaryResults,
+  saveGappersSummaryResults,
 } from "./gappers-client";
 import type { GappersRow } from "./gappers";
 
@@ -60,6 +64,129 @@ describe("buildGappersSummaryRequests", () => {
   });
 });
 
+describe("gapper summary cache", () => {
+  it("restores fresh summary results for matching request/provider/model", () => {
+    const storage = new MemoryStorage();
+    const requests = [
+      {
+        previousCloseAt: "2026-06-05T20:00:00.000Z",
+        symbol: "STI",
+      },
+    ];
+    const results = [
+      {
+        message: "No Massive news found after previous close.",
+        status: "no_news" as const,
+        symbol: "STI",
+      },
+    ];
+
+    saveGappersSummaryResults({
+      model: "gpt-4o-mini",
+      now: 1000,
+      provider: "openai",
+      requests,
+      results,
+      storage,
+    });
+
+    expect(
+      getCachedGappersSummaryResults({
+        maxAgeMs: 60_000,
+        model: "gpt-4o-mini",
+        now: 2000,
+        provider: "openai",
+        requests,
+        storage,
+      }),
+    ).toEqual({
+      cachedResults: results,
+      missingRequests: [],
+    });
+  });
+
+  it("returns expired or unmatched summary requests as missing", () => {
+    const storage = new MemoryStorage();
+    const requests = [
+      {
+        previousCloseAt: "2026-06-05T20:00:00.000Z",
+        symbol: "STI",
+      },
+    ];
+
+    saveGappersSummaryResults({
+      model: "gpt-4o-mini",
+      now: 1000,
+      provider: "openai",
+      requests,
+      results: [
+        {
+          message: "No Massive news found after previous close.",
+          status: "no_news",
+          symbol: "STI",
+        },
+      ],
+      storage,
+    });
+
+    expect(
+      getCachedGappersSummaryResults({
+        maxAgeMs: 60_000,
+        model: "gpt-4o-mini",
+        now: 70_001,
+        provider: "openai",
+        requests,
+        storage,
+      }),
+    ).toEqual({
+      cachedResults: [],
+      missingRequests: requests,
+    });
+
+    expect(
+      getCachedGappersSummaryResults({
+        maxAgeMs: 60_000,
+        model: "gpt-4o-2024-08-06",
+        now: 2000,
+        provider: "openai",
+        requests,
+        storage,
+      }),
+    ).toEqual({
+      cachedResults: [],
+      missingRequests: requests,
+    });
+  });
+
+  it("restores the last displayed summary results while they are fresh", () => {
+    const storage = new MemoryStorage();
+    const results = [
+      {
+        message: "No Massive news found after previous close.",
+        status: "no_news" as const,
+        symbol: "STI",
+      },
+    ];
+
+    saveLastGappersSummaryResults({ now: 1000, results, storage });
+
+    expect(
+      getLastGappersSummaryResults({
+        maxAgeMs: 60_000,
+        now: 2000,
+        storage,
+      }),
+    ).toEqual(results);
+    expect(
+      getLastGappersSummaryResults({
+        maxAgeMs: 60_000,
+        now: 70_001,
+        storage,
+      }),
+    ).toEqual([]);
+  });
+});
+
 function row(
   symbol: string,
   securityType: GappersRow["securityType"],
@@ -79,4 +206,16 @@ function row(
     securityType,
     symbol,
   };
+}
+
+class MemoryStorage {
+  private readonly values = new Map<string, string>();
+
+  getItem(key: string) {
+    return this.values.get(key) ?? null;
+  }
+
+  setItem(key: string, value: string) {
+    this.values.set(key, value);
+  }
 }
