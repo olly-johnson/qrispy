@@ -18,6 +18,7 @@ const NEWS_SUMMARY_MODELS = ["gpt-4o-mini", "gpt-4o-2024-08-06"] as const;
 
 type NewsSummaryResult =
   | { rendered: string; status: "success"; symbol: string }
+  | { message: string; status: "no_news"; symbol: string }
   | { error: string; status: "error"; symbol: string };
 
 export function GappersTable({
@@ -256,14 +257,20 @@ export function GappersTable({
                     className={`rounded-sm px-2 py-1 text-xs ${
                       result.status === "success"
                         ? "bg-emerald-300/10 text-emerald-200"
+                        : result.status === "no_news"
+                          ? "bg-zinc-300/10 text-zinc-300"
                         : "bg-rose-300/10 text-rose-200"
                     }`}
                   >
-                    {result.status}
+                    {result.status === "no_news" ? "no news" : result.status}
                   </span>
                 </div>
                 <pre className="whitespace-pre-wrap font-mono text-xs leading-6 text-zinc-300">
-                  {result.status === "success" ? result.rendered : result.error}
+                  {result.status === "success"
+                    ? result.rendered
+                    : result.status === "no_news"
+                      ? result.message
+                      : result.error}
                 </pre>
               </article>
             ))}

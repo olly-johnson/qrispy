@@ -37,6 +37,7 @@ export type NewsSummaryProvider = {
 
 export type NewsSummaryResult =
   | { rendered: string; status: "success"; symbol: string }
+  | { message: string; status: "no_news"; symbol: string }
   | { error: string; status: "error"; symbol: string };
 
 const SUPPORTED_MODELS = {
@@ -92,6 +93,14 @@ export async function batchSummarizeGapperNews({
   return Promise.all(
     requests.map(async (request) => {
       try {
+        if (request.news.length === 0) {
+          return {
+            message: "No Massive news found after previous close.",
+            status: "no_news" as const,
+            symbol: request.symbol,
+          };
+        }
+
         const extracted = await provider.extract({ ...request, model });
 
         return {

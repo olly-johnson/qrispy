@@ -117,12 +117,12 @@ describe("batchSummarizeGapperNews", () => {
         provider,
         requests: [
           {
-            news: [],
+            news: [article("ACME")],
             previousCloseAt: "2026-06-03T20:00:00.000Z",
             symbol: "ACME",
           },
           {
-            news: [],
+            news: [article("FAIL")],
             previousCloseAt: "2026-06-03T20:00:00.000Z",
             symbol: "FAIL",
           },
@@ -138,6 +138,33 @@ describe("batchSummarizeGapperNews", () => {
     ]);
 
     expect(provider.extract).toHaveBeenCalledTimes(2);
+  });
+
+  it("returns a no-news result without calling the LLM when Massive has no articles", async () => {
+    const provider: NewsSummaryProvider = {
+      extract: vi.fn(async () => emptyExtracted()),
+    };
+
+    await expect(
+      batchSummarizeGapperNews({
+        provider,
+        requests: [
+          {
+            news: [],
+            previousCloseAt: "2026-06-05T20:00:00.000Z",
+            symbol: "STI",
+          },
+        ],
+      }),
+    ).resolves.toEqual([
+      {
+        message: "No Massive news found after previous close.",
+        status: "no_news",
+        symbol: "STI",
+      },
+    ]);
+
+    expect(provider.extract).not.toHaveBeenCalled();
   });
 });
 
@@ -201,5 +228,16 @@ function emptyExtracted(): ExtractedGapperNews {
     fullYearGuidance: { eps: null, revenue: null },
     nextQuarterGuidance: { eps: null, revenue: null },
     notableNews: [],
+  };
+}
+
+function article(symbol: string) {
+  return {
+    articleUrl: `https://example.com/${symbol.toLowerCase()}`,
+    description: `${symbol} reported news.`,
+    id: `${symbol}-article-1`,
+    publishedUtc: "2026-06-04T11:00:00.000Z",
+    tickers: [symbol],
+    title: `${symbol} news`,
   };
 }
