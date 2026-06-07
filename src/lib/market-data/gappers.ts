@@ -63,6 +63,7 @@ export async function buildGappersSnapshot({
   }
 
   try {
+    const usePreviousSessionVolumeFallback = !isRegularMarketOpen(now);
     const [references, snapshots] = await Promise.all([
       provider.getActiveStockTickers(),
       provider.getFullMarketSnapshot(),
@@ -73,6 +74,7 @@ export async function buildGappersSnapshot({
         normalizeCandidate(
           snapshot,
           universe.get(String(snapshot.ticker ?? "").toUpperCase()),
+          { usePreviousSessionVolumeFallback },
         ),
       )
       .filter((row): row is Omit<GappersRow, "previousCloseAt"> => row != null)
@@ -107,18 +109,38 @@ export function getGappersMode(now: Date): GappersMode {
   const parts = easternDateParts(now);
   const minutes = parts.hour * 60 + parts.minute + parts.second / 60;
 
-  return minutes >= 4 * 60 && minutes < 9 * 60 + 30 ? "extended" : "regular";
+  return isWeekday(parts) && minutes >= 4 * 60 && minutes < 9 * 60 + 30
+    ? "extended"
+    : "regular";
+}
+
+function isRegularMarketOpen(now: Date) {
+  const parts = easternDateParts(now);
+  const minutes = parts.hour * 60 + parts.minute + parts.second / 60;
+
+  return isWeekday(parts) && minutes >= 9 * 60 + 30 && minutes < 16 * 60;
 }
 
 export function getExtendedHoursWindows(now: Date): ExtendedHoursWindow[] {
   const today = easternDateParts(now);
-  const yesterdayNoon = new Date(Date.UTC(today.year, today.month - 1, today.day - 1, 12));
-  const yesterday = easternDateParts(yesterdayNoon);
+  const previousTradingDay = getPreviousTradingDayParts(now);
 
   return [
     {
-      from: easternDateTimeToUtc(yesterday.year, yesterday.month, yesterday.day, 16, 0),
-      to: easternDateTimeToUtc(yesterday.year, yesterday.month, yesterday.day, 20, 0),
+      from: easternDateTimeToUtc(
+        previousTradingDay.year,
+        previousTradingDay.month,
+        previousTradingDay.day,
+        16,
+        0,
+      ),
+      to: easternDateTimeToUtc(
+        previousTradingDay.year,
+        previousTradingDay.month,
+        previousTradingDay.day,
+        20,
+        0,
+      ),
     },
     {
       from: easternDateTimeToUtc(today.year, today.month, today.day, 4, 0),
@@ -188,6 +210,7 @@ function buildUniverse(references: MassiveReferenceTicker[]) {
 function normalizeCandidate(
   snapshot: MassiveSnapshotTicker,
   reference: { name: string; securityType: GappersSecurityType } | undefined,
+  options: { usePreviousSessionVolumeFallback: boolean },
 ): Omit<GappersRow, "previousCloseAt"> | null {
   const symbol = String(snapshot.ticker ?? "").toUpperCase();
   const price = firstFiniteNumber([
@@ -206,8 +229,23 @@ function normalizeCandidate(
     return null;
   }
 
+  const currentRegularVolume =
+    firstFiniteNumber([
+      getPath(snapshot, ["day", "v"]),
+      getPath(snapshot, ["session", "volume"]),
+    ]) ?? 0;
+  const previousRegularVolume =
+    firstFiniteNumber([
+      getPath(snapshot, ["prevDay", "v"]),
+      getPath(snapshot, ["session", "previous_volume"]),
+      getPath(snapshot, ["session", "previous_day_volume"]),
+    ]) ?? null;
   const activeVolume =
-    firstFiniteNumber([getPath(snapshot, ["day", "v"]), getPath(snapshot, ["session", "volume"])]) ?? 0;
+    options.usePreviousSessionVolumeFallback &&
+    currentRegularVolume <= 0 &&
+    previousRegularVolume != null
+      ? previousRegularVolume
+      : currentRegularVolume;
   const updated = firstFiniteNumber([snapshot.updated, snapshot.last_updated]);
 
   return {
@@ -228,16 +266,12 @@ function sortByDollarVolume(rows: GappersRow[]) {
 }
 
 function getPreviousRegularCloseAt(now: Date) {
-  const today = easternDateParts(now);
-  const yesterdayNoon = new Date(
-    Date.UTC(today.year, today.month - 1, today.day - 1, 12),
-  );
-  const yesterday = easternDateParts(yesterdayNoon);
+  const previousTradingDay = getPreviousTradingDayParts(now);
 
   return easternDateTimeToUtc(
-    yesterday.year,
-    yesterday.month,
-    yesterday.day,
+    previousTradingDay.year,
+    previousTradingDay.month,
+    previousTradingDay.day,
     16,
     0,
   );
@@ -316,6 +350,25 @@ function easternDateParts(value: Date) {
     second: Number(parts.second),
     year: Number(parts.year),
   };
+}
+
+function getPreviousTradingDayParts(now: Date) {
+  const today = easternDateParts(now);
+  const cursor = new Date(Date.UTC(today.year, today.month - 1, today.day, 12));
+
+  do {
+    cursor.setUTCDate(cursor.getUTCDate() - 1);
+  } while (!isWeekday(easternDateParts(cursor)));
+
+  return easternDateParts(cursor);
+}
+
+function isWeekday(parts: ReturnType<typeof easternDateParts>) {
+  const dayOfWeek = new Date(
+    Date.UTC(parts.year, parts.month - 1, parts.day, 12),
+  ).getUTCDay();
+
+  return dayOfWeek >= 1 && dayOfWeek <= 5;
 }
 
 function easternDateTimeToUtc(

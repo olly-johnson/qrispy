@@ -16,6 +16,10 @@ describe("getGappersMode", () => {
     expect(getGappersMode(new Date("2026-06-04T13:30:00.000Z"))).toBe("regular");
     expect(getGappersMode(new Date("2026-06-04T21:00:00.000Z"))).toBe("regular");
   });
+
+  it("keeps weekend mornings in regular mode", () => {
+    expect(getGappersMode(new Date("2026-06-07T12:00:00.000Z"))).toBe("regular");
+  });
 });
 
 describe("getExtendedHoursWindows", () => {
@@ -28,6 +32,19 @@ describe("getExtendedHoursWindows", () => {
       {
         from: new Date("2026-06-04T08:00:00.000Z"),
         to: new Date("2026-06-04T13:30:00.000Z"),
+      },
+    ]);
+  });
+
+  it("uses the previous trading day for Monday premarket after-hours", () => {
+    expect(getExtendedHoursWindows(new Date("2026-06-08T12:00:00.000Z"))).toEqual([
+      {
+        from: new Date("2026-06-05T20:00:00.000Z"),
+        to: new Date("2026-06-06T00:00:00.000Z"),
+      },
+      {
+        from: new Date("2026-06-08T08:00:00.000Z"),
+        to: new Date("2026-06-08T13:30:00.000Z"),
       },
     ]);
   });
@@ -113,6 +130,66 @@ describe("buildGappersSnapshot", () => {
     expect(provider.getAggregateBars).not.toHaveBeenCalled();
   });
 
+  it("uses previous-session volume before premarket when the current session has no volume", async () => {
+    const provider = providerWith({
+      aggregateBars: {},
+      snapshots: [
+        snapshot("ACME", {
+          previousClose: 10,
+          previousRegularVolume: 70_000,
+          price: 12,
+          regularVolume: 0,
+        }),
+      ],
+      tickers: [ticker("ACME", "Acme Corp", "CS", "stocks")],
+    });
+
+    const result = await buildGappersSnapshot({
+      now: new Date("2026-06-07T12:00:00.000Z"),
+      provider,
+    });
+
+    expect(result.mode).toBe("regular");
+    expect(result.rows).toEqual([
+      expect.objectContaining({
+        activeDollarVolume: 840_000,
+        activeVolume: 70_000,
+        previousCloseAt: "2026-06-05T20:00:00.000Z",
+        symbol: "ACME",
+      }),
+    ]);
+    expect(provider.getAggregateBars).not.toHaveBeenCalled();
+  });
+
+  it("keeps current regular-session volume during market hours", async () => {
+    const provider = providerWith({
+      aggregateBars: {},
+      snapshots: [
+        snapshot("ACME", {
+          previousClose: 10,
+          previousRegularVolume: 70_000,
+          price: 12,
+          regularVolume: 20_000,
+        }),
+      ],
+      tickers: [ticker("ACME", "Acme Corp", "CS", "stocks")],
+    });
+
+    const result = await buildGappersSnapshot({
+      now: new Date("2026-06-04T15:00:00.000Z"),
+      provider,
+    });
+
+    expect(result.mode).toBe("regular");
+    expect(result.rows).toEqual([
+      expect.objectContaining({
+        activeDollarVolume: 240_000,
+        activeVolume: 20_000,
+        symbol: "ACME",
+      }),
+    ]);
+  });
+
   it("returns a configuration error when Massive is unavailable", async () => {
     await expect(
       buildGappersSnapshot({
@@ -159,12 +236,17 @@ function ticker(tickerSymbol: string, name: string, type: string, market: string
 
 function snapshot(
   tickerSymbol: string,
-  input: { previousClose: number; price: number; regularVolume: number },
+  input: {
+    previousClose: number;
+    previousRegularVolume?: number;
+    price: number;
+    regularVolume: number;
+  },
 ) {
   return {
     day: { v: input.regularVolume },
     min: { c: input.price },
-    prevDay: { c: input.previousClose },
+    prevDay: { c: input.previousClose, v: input.previousRegularVolume },
     ticker: tickerSymbol,
     updated: 1_780_000_000_000,
   };
