@@ -206,6 +206,32 @@ describe("loadStockbeeBreadthHistory", () => {
     );
     expect(result.selectedRows).toEqual([row({ date: "2026-06-10" })]);
   });
+
+  it("formats structured Supabase errors when persisted read fails", async () => {
+    const client = fakeStockbeeClient([], {
+      readError: {
+        code: "PGRST205",
+        message: "Could not find the table 'public.stockbee_breadth_rows'",
+      },
+    });
+    const fetcher = vi.fn().mockResolvedValue({
+      ok: true,
+      status: 200,
+      text: async () => csvForDates(["6/10/2026"]),
+    });
+
+    const result = await loadStockbeeBreadthHistory({
+      client,
+      fetcher,
+      requestedYear: undefined,
+      sourceUrl,
+    });
+
+    expect(result.syncError).toBe(
+      "Persisted Stockbee history unavailable: PGRST205: Could not find the table 'public.stockbee_breadth_rows'",
+    );
+    expect(result.syncError).not.toContain("[object Object]");
+  });
 });
 
 function row(overrides: Partial<StockbeeBreadthRow> = {}): StockbeeBreadthRow {

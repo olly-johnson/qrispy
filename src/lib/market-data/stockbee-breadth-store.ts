@@ -230,5 +230,26 @@ function numberOrZero(value: unknown) {
 }
 
 function errorMessage(error: unknown) {
-  return error instanceof Error ? error.message : String(error);
+  if (error instanceof Error) {
+    return error.message;
+  }
+
+  if (error && typeof error === "object") {
+    const record = error as Record<string, unknown>;
+    const message = stringValue(record.message);
+    const code = stringValue(record.code);
+
+    if (message && code) {
+      return `${code}: ${message}`;
+    }
+    if (message) {
+      return message;
+    }
+  }
+
+  return String(error);
+}
+
+function stringValue(value: unknown) {
+  return typeof value === "string" && value.trim() ? value : null;
 }
