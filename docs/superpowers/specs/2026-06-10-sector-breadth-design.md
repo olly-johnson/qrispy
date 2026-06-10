@@ -42,6 +42,8 @@ Massive remains the source for live and historical market data:
 
 Massive API keys stay server-side. Browser code must never call Massive directly.
 
+The sector breadth page should reuse the existing Massive provider methods used by the gappers page. Implementation should extract shared helpers for active common-stock universe filtering and full-market snapshot normalization where useful, so gappers and sector breadth do not duplicate provider-shape parsing. The sector breadth page must still load independently; it should not depend on the gappers page being visited first. Existing in-process reference ticker caching can be reused as an optimization.
+
 ### Free SIC-Derived Classification
 
 Add a classification import/cache independent of live market data. Classification lookup should not fetch one ticker overview per symbol during page render. The page should read a local cache that can be refreshed by a separate import step.
