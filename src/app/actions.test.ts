@@ -1,9 +1,15 @@
 import { revalidatePath } from "next/cache";
 import { describe, expect, it, vi } from "vitest";
 
+import { inngest } from "@/inngest/client";
 import { requireUser } from "@/lib/auth/session";
 import { createSupabaseServerClient } from "@/lib/supabase/server";
-import { updateTradeStopLoss } from "./actions";
+import { buildTradeZeroSyncEvent } from "@/lib/sync/events";
+import {
+  getLatestSuccessfulTradeZeroSyncToDate,
+  recordTradeZeroSyncQueued,
+} from "@/lib/sync/job-runs";
+import { requestTradeZeroSync, updateTradeStopLoss } from "./actions";
 
 vi.mock("next/cache", () => ({
   revalidatePath: vi.fn(),
@@ -26,9 +32,67 @@ vi.mock("@/lib/sync/events", () => ({
 }));
 
 vi.mock("@/lib/sync/job-runs", () => ({
+  getLatestSuccessfulTradeZeroSyncToDate: vi.fn(),
   recordTradeZeroSyncQueued: vi.fn(),
   recordTradeZeroSyncFailed: vi.fn(),
 }));
+
+describe("requestTradeZeroSync", () => {
+  it("creates a manual sync event from the latest successful sync date", async () => {
+    vi.mocked(requireUser).mockResolvedValue({
+      id: "user-1",
+      email: "owner@example.com",
+    });
+    vi.mocked(getLatestSuccessfulTradeZeroSyncToDate).mockResolvedValue(
+      "2026-06-07",
+    );
+    vi.mocked(buildTradeZeroSyncEvent).mockReturnValue({
+      name: "tradezero/sync.requested",
+      id: "event-1",
+      data: {
+        user_id: "user-1",
+        requested_by: "manual",
+        sync_scope: "backfill",
+        from_date: "2026-06-07",
+        to_date: "2026-06-10",
+        idempotency_key: "tradezero-sync:user-1:manual:2026-06-10",
+      },
+    });
+    vi.mocked(recordTradeZeroSyncQueued).mockResolvedValue({ id: "job-1" });
+    vi.mocked(inngest.send).mockResolvedValue({ ids: ["event-1"] });
+
+    await requestTradeZeroSync();
+
+    expect(getLatestSuccessfulTradeZeroSyncToDate).toHaveBeenCalledWith("user-1");
+    expect(buildTradeZeroSyncEvent).toHaveBeenCalledWith({
+      userId: "user-1",
+      requestedBy: "manual",
+      fromDate: "2026-06-07",
+    });
+    expect(recordTradeZeroSyncQueued).toHaveBeenCalledWith({
+      user_id: "user-1",
+      requested_by: "manual",
+      sync_scope: "backfill",
+      from_date: "2026-06-07",
+      to_date: "2026-06-10",
+      idempotency_key: "tradezero-sync:user-1:manual:2026-06-10",
+    });
+    expect(inngest.send).toHaveBeenCalledWith({
+      name: "tradezero/sync.requested",
+      id: "event-1",
+      data: {
+        user_id: "user-1",
+        requested_by: "manual",
+        sync_scope: "backfill",
+        from_date: "2026-06-07",
+        to_date: "2026-06-10",
+        idempotency_key: "tradezero-sync:user-1:manual:2026-06-10",
+      },
+    });
+    expect(revalidatePath).toHaveBeenCalledWith("/dashboard");
+    expect(revalidatePath).toHaveBeenCalledWith("/jobs");
+  });
+});
 
 describe("updateTradeStopLoss", () => {
   it("updates one authenticated stop group and recalculates risk", async () => {

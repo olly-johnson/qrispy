@@ -24,6 +24,41 @@ describe("buildTradeZeroSyncEvent", () => {
     });
   });
 
+  it("creates a scheduled sync event for the last 24 hour date window", () => {
+    const event = buildTradeZeroSyncEvent({
+      userId: "user-1",
+      requestedBy: "schedule",
+      now: new Date("2026-06-10T11:15:00.000Z"),
+    });
+
+    expect(event.data).toEqual({
+      user_id: "user-1",
+      requested_by: "schedule",
+      sync_scope: "daily",
+      from_date: "2026-06-09",
+      to_date: "2026-06-10",
+      idempotency_key: "tradezero-sync:user-1:schedule:2026-06-10",
+    });
+  });
+
+  it("uses a supplied from date for manual incremental syncs", () => {
+    const event = buildTradeZeroSyncEvent({
+      userId: "user-1",
+      requestedBy: "manual",
+      fromDate: "2026-06-07",
+      now: new Date("2026-06-10T11:15:00.000Z"),
+    });
+
+    expect(event.data).toEqual({
+      user_id: "user-1",
+      requested_by: "manual",
+      sync_scope: "backfill",
+      from_date: "2026-06-07",
+      to_date: "2026-06-10",
+      idempotency_key: "tradezero-sync:user-1:manual:2026-06-10",
+    });
+  });
+
   it("keeps the daily job key stable while giving repeat requests distinct event ids", () => {
     const first = buildTradeZeroSyncEvent({
       userId: "user-1",

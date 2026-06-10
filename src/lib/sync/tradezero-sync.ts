@@ -139,6 +139,7 @@ type CurrentBrokerPosition = {
 const IGNORED_OPEN_DECEMBER_TRADE_SYMBOLS = new Set(["UGL", "AGQ", "ERO", "ROIV"]);
 const IGNORED_DECEMBER_OPEN_START = "2025-12-01T00:00:00.000Z";
 const IGNORED_DECEMBER_OPEN_END = "2026-01-01T00:00:00.000Z";
+const TRADE_RECONSTRUCTION_LOOKBACK_START_DATE = "2025-12-01";
 
 export async function runTradeZeroSync(input: SyncInput) {
   const supabase = createSupabaseAdminClient();
@@ -349,12 +350,16 @@ export async function replaceReconstructedTrades(input: {
   }
 
   const client = supabase as RebuildTradeClient;
+  const reconstructionFromDate = earliestDate(
+    input.fromDate,
+    TRADE_RECONSTRUCTION_LOOKBACK_START_DATE,
+  );
   const { data, error } = await client
     .from("fills")
     .select("*")
     .eq("user_id", input.userId)
     .in("account_id", input.accountIds)
-    .gte("trade_date", input.fromDate)
+    .gte("trade_date", reconstructionFromDate)
     .lte("trade_date", input.toDate)
     .order("executed_at", { ascending: true });
 
@@ -373,7 +378,7 @@ export async function replaceReconstructedTrades(input: {
     client,
     userId: input.userId,
     accountIds: input.accountIds,
-    fromDate: input.fromDate,
+    fromDate: reconstructionFromDate,
     toDate: input.toDate,
   });
   await deleteStaleRebuiltTrades({
@@ -995,6 +1000,10 @@ function nextDate(date: string) {
   const parsed = new Date(`${date}T00:00:00.000Z`);
   parsed.setUTCDate(parsed.getUTCDate() + 1);
   return parsed.toISOString();
+}
+
+function earliestDate(left: string, right: string) {
+  return left < right ? left : right;
 }
 
 function roundMoney(value: number) {

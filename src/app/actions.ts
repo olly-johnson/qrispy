@@ -7,15 +7,19 @@ import { requireUser } from "@/lib/auth/session";
 import { createSupabaseServerClient } from "@/lib/supabase/server";
 import { buildTradeZeroSyncEvent } from "@/lib/sync/events";
 import {
+  getLatestSuccessfulTradeZeroSyncToDate,
   recordTradeZeroSyncFailed,
   recordTradeZeroSyncQueued,
 } from "@/lib/sync/job-runs";
 
 export async function requestTradeZeroSync() {
   const user = await requireUser();
+  const latestSuccessfulSyncToDate =
+    await getLatestSuccessfulTradeZeroSyncToDate(user.id);
   const event = buildTradeZeroSyncEvent({
     userId: user.id,
     requestedBy: "manual",
+    ...(latestSuccessfulSyncToDate ? { fromDate: latestSuccessfulSyncToDate } : {}),
   });
 
   const jobRun = await recordTradeZeroSyncQueued(event.data);

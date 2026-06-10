@@ -186,6 +186,109 @@ describe("replaceReconstructedTrades", () => {
     ]);
   });
 
+  it("rebuilds from stored historical fills when an incremental sync closes older trades", async () => {
+    const fillsOrder = vi.fn().mockResolvedValue({
+      data: [
+        storedFill({
+          id: "twlo-old-entry",
+          side: "BUY",
+          quantity: 5,
+          price: 198.15,
+          executedAt: "2026-06-01T13:39:12.000Z",
+          fees: 1,
+          symbol: "TWLO",
+        }),
+        storedFill({
+          id: "twlo-window-exit",
+          side: "SELL",
+          quantity: 5,
+          price: 195.55,
+          executedAt: "2026-06-09T16:20:37.000Z",
+          fees: 1,
+          symbol: "TWLO",
+        }),
+      ],
+      error: null,
+    });
+    const fillsLte = vi.fn(() => ({ order: fillsOrder }));
+    const fillsGte = vi.fn(() => ({ lte: fillsLte }));
+    const fillsIn = vi.fn(() => ({ gte: fillsGte }));
+    const fillsEq = vi.fn(() => ({ in: fillsIn }));
+    const fillsSelect = vi.fn(() => ({ eq: fillsEq }));
+
+    const existingTradesLt = vi.fn().mockResolvedValue({
+      data: [
+        {
+          id: "existing-twlo-open",
+          reconstruction_key: "account-1:TWLO:twlo-old-entry",
+        },
+        {
+          id: "stale-twlo-short",
+          reconstruction_key: "account-1:TWLO:twlo-window-exit",
+        },
+      ],
+      error: null,
+    });
+    const existingTradesGte = vi.fn(() => ({ lt: existingTradesLt }));
+    const existingTradesIn = vi.fn(() => ({ gte: existingTradesGte }));
+    const existingTradesEq = vi.fn(() => ({ in: existingTradesIn }));
+    const tradesSelect = vi.fn(() => ({ eq: existingTradesEq }));
+    const deleteStaleTradesById = vi.fn().mockResolvedValue({ error: null });
+    const deleteStaleTradesEq = vi.fn(() => ({ in: deleteStaleTradesById }));
+    const deleteTrades = vi.fn(() => ({ eq: deleteStaleTradesEq }));
+    const selectUpsertedTrades = vi.fn().mockResolvedValue({
+      data: [
+        {
+          id: "existing-twlo-open",
+          reconstruction_key: "account-1:TWLO:twlo-old-entry",
+        },
+      ],
+      error: null,
+    });
+    const upsert = vi.fn(() => ({ select: selectUpsertedTrades }));
+    const insertTradeFills = vi.fn().mockResolvedValue({ error: null });
+    const from = vi.fn((table: string) => {
+      if (table === "fills") {
+        return { select: fillsSelect };
+      }
+      if (table === "trade_fills") {
+        return tradeFillsTable(insertTradeFills);
+      }
+
+      return {
+        delete: deleteTrades,
+        select: tradesSelect,
+        upsert,
+      };
+    });
+
+    await replaceReconstructedTrades({
+      client: { from },
+      userId: "user-1",
+      accountIds: ["account-1"],
+      fromDate: "2026-06-07",
+      toDate: "2026-06-10",
+    });
+
+    expect(fillsGte).toHaveBeenCalledWith("trade_date", "2025-12-01");
+    expect(existingTradesGte).toHaveBeenCalledWith(
+      "opened_at",
+      "2025-12-01T00:00:00.000Z",
+    );
+    expect(deleteStaleTradesById).toHaveBeenCalledWith("id", ["stale-twlo-short"]);
+    expect(upsert.mock.calls[0][0]).toEqual([
+      expect.objectContaining({
+        reconstruction_key: "account-1:TWLO:twlo-old-entry",
+        symbol: "TWLO",
+        direction: "LONG",
+        status: "CLOSED",
+        closed_at: "2026-06-09T16:20:37.000Z",
+        entry_quantity: 5,
+        avg_exit_price: 195.55,
+      }),
+    ]);
+  });
+
   it("does not recreate ignored open December trades during reconstruction", async () => {
     const fillsOrder = vi.fn().mockResolvedValue({
       data: [

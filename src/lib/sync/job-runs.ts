@@ -18,6 +18,25 @@ type JobRunStatus = "queued" | "running" | "succeeded" | "failed";
 
 type JobRunClient = {
   from(table: "job_runs"): {
+    select(columns: "metadata"): {
+      eq(column: "user_id", value: string): {
+        eq(column: "job_type", value: "tradezero_sync"): {
+          eq(column: "status", value: "succeeded"): {
+            order(
+              column: "completed_at",
+              options: { ascending: boolean },
+            ): {
+              limit(count: 1): {
+                maybeSingle(): Promise<{
+                  data: { metadata: unknown } | null;
+                  error: unknown;
+                }>;
+              };
+            };
+          };
+        };
+      };
+    };
     upsert(
       values: Record<string, unknown>,
       options: { onConflict: string },
@@ -65,6 +84,28 @@ export async function recordTradeZeroSyncFailed(
   options: JobRunOptions = {},
 ) {
   return upsertTradeZeroSyncJob(input, "failed", { ...options, error });
+}
+
+export async function getLatestSuccessfulTradeZeroSyncToDate(
+  userId: string,
+  options: Pick<JobRunOptions, "client"> = {},
+) {
+  const supabase = resolveJobRunClient(options.client);
+  const { data, error } = await supabase
+    .from("job_runs")
+    .select("metadata")
+    .eq("user_id", userId)
+    .eq("job_type", "tradezero_sync")
+    .eq("status", "succeeded")
+    .order("completed_at", { ascending: false })
+    .limit(1)
+    .maybeSingle();
+
+  if (error) {
+    throw error;
+  }
+
+  return syncToDate(data?.metadata);
 }
 
 async function upsertTradeZeroSyncJob(
@@ -160,4 +201,15 @@ function errorMessage(error: unknown) {
   }
 
   return String(error);
+}
+
+function syncToDate(metadata: unknown) {
+  if (!metadata || typeof metadata !== "object") {
+    return null;
+  }
+
+  const toDate = (metadata as Record<string, unknown>).to_date;
+  return typeof toDate === "string" && /^\d{4}-\d{2}-\d{2}$/.test(toDate)
+    ? toDate
+    : null;
 }
