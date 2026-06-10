@@ -3,6 +3,8 @@ import { describe, expect, it } from "vitest";
 import {
   buildDashboardBreadthSnapshot,
   buildMarketBreadthSnapshot,
+  fetchStockbeeMarketMonitorWorkbookRows,
+  parseStockbeeMarketMonitorSheets,
   parseStockbeeMarketMonitorCsv,
   summarizeMarketIndexBars,
   t2108Color,
@@ -31,6 +33,133 @@ describe("parseStockbeeMarketMonitorCsv", () => {
       expect.objectContaining({
         date: "2026-06-02",
         sp500: 7609.78,
+      }),
+    ]);
+  });
+
+  it("maps legacy 2013 headers by name and repairs sheet-year typos", () => {
+    const csv = `Primary Indicators,,,,,,,,,,,Secondary Indicators,,,,,,,,,\nDate,4% plus daily,4% down daily,5 day breadth ratio,10 day breadth ratio,Bottom Day,TNA Vbbee buy/sale,25% plus  quarter,25% down quarter,Primary Breadth Ratio,,25% plus month,25% down month,50% plus month,50% down month,34/13 bull,34/13 bear,Common Stocks,T2108,c>avgc5 ,c<avgc5\n5/20/0213,186,43,2.18,1.89,,,878,216,4.06,,201,18,29,2,1686,328,5786,74,,\n`;
+
+    expect(parseStockbeeMarketMonitorCsv(csv, { fallbackYear: 2013 })).toEqual([
+      expect.objectContaining({
+        date: "2013-05-20",
+        down13In34Days: 328,
+        down25Month: 18,
+        down25Quarter: 216,
+        down4Percent: 43,
+        down50Month: 2,
+        ratio10Day: 1.89,
+        ratio5Day: 2.18,
+        t2108: 74,
+        universeCount: 5786,
+        up13In34Days: 1686,
+        up25Month: 201,
+        up25Quarter: 878,
+        up4Percent: 186,
+        up50Month: 29,
+      }),
+    ]);
+  });
+
+  it("uses the sheet year for old reformatted rows without a year", () => {
+    const csv = `Date,# of Stocks Up >4%  on high volume,# of stocks down >4%  on high volume,Oscillator % ratio,Primary Indicator,# of stocks up >25% in a quarter,# of stocks down >25% in a quarter,Oscillator % ratio,Secondary Indicators,# of stocks up >50% in a month,# of stocks down >50% in a month,,# of stocks up >25% in a month,# of stocks down >25% in a month,,# of stocks up >100% in a year,# of stocks up >200% in a year,,MM 34/13 +,MM 34/13 -,,,# of stocks in Worden Database\n12/31,952,92,,,2849,2415,,,74,11,,533,68,,304,54,,3780,1202,,,6172\n`;
+
+    expect(parseStockbeeMarketMonitorCsv(csv, { fallbackYear: 2008 })).toEqual([
+      expect.objectContaining({
+        date: "2008-12-31",
+        down13In34Days: 1202,
+        down25Month: 68,
+        down25Quarter: 2415,
+        down4Percent: 92,
+        down50Month: 11,
+        universeCount: 6172,
+        up13In34Days: 3780,
+        up25Month: 533,
+        up25Quarter: 2849,
+        up4Percent: 952,
+        up50Month: 74,
+      }),
+    ]);
+  });
+});
+
+describe("parseStockbeeMarketMonitorSheets", () => {
+  it("finds year sheets, skips chart tabs, and prefers reformatted old years", () => {
+    const html = [
+      'items.push({name: "2026", pageUrl: "https:\\/\\/docs.google.com\\/spreadsheets\\/d\\/1O6OhS7ciA8zwfycBfGPbP2fWJnR0pn2UUvFZVDP9jpE\\/pubhtml\\/sheet?headers\\x3dfalse&gid=1082103394", gid: "1082103394",initialSheet: ("1082103394" == gid)});',
+      'items.push({name: "Chart 2026", pageUrl: "https:\\/\\/docs.google.com\\/spreadsheets\\/d\\/1O6OhS7ciA8zwfycBfGPbP2fWJnR0pn2UUvFZVDP9jpE\\/pubhtml\\/sheet?headers\\x3dfalse&gid=558544032", gid: "558544032",initialSheet: ("558544032" == gid)});',
+      'items.push({name: "2008", pageUrl: "https:\\/\\/docs.google.com\\/spreadsheets\\/d\\/1O6OhS7ciA8zwfycBfGPbP2fWJnR0pn2UUvFZVDP9jpE\\/pubhtml\\/sheet?headers\\x3dfalse&gid=1269494253", gid: "1269494253",initialSheet: ("1269494253" == gid)});',
+      'items.push({name: "Copy of 2008 reformatted", pageUrl: "https:\\/\\/docs.google.com\\/spreadsheets\\/d\\/1O6OhS7ciA8zwfycBfGPbP2fWJnR0pn2UUvFZVDP9jpE\\/pubhtml\\/sheet?headers\\x3dfalse&gid=1770823350", gid: "1770823350",initialSheet: ("1770823350" == gid)});',
+      'items.push({name: "Copy of 2007 reformatted", pageUrl: "https:\\/\\/docs.google.com\\/spreadsheets\\/d\\/1O6OhS7ciA8zwfycBfGPbP2fWJnR0pn2UUvFZVDP9jpE\\/pubhtml\\/sheet?headers\\x3dfalse&gid=269978205", gid: "269978205",initialSheet: ("269978205" == gid)});',
+    ].join("");
+
+    expect(parseStockbeeMarketMonitorSheets(html)).toEqual([
+      {
+        csvUrl:
+          "https://docs.google.com/spreadsheets/d/1O6OhS7ciA8zwfycBfGPbP2fWJnR0pn2UUvFZVDP9jpE/pub?gid=1082103394&single=true&output=csv",
+        gid: "1082103394",
+        name: "2026",
+        year: 2026,
+      },
+      {
+        csvUrl:
+          "https://docs.google.com/spreadsheets/d/1O6OhS7ciA8zwfycBfGPbP2fWJnR0pn2UUvFZVDP9jpE/pub?gid=1770823350&single=true&output=csv",
+        gid: "1770823350",
+        name: "Copy of 2008 reformatted",
+        year: 2008,
+      },
+      {
+        csvUrl:
+          "https://docs.google.com/spreadsheets/d/1O6OhS7ciA8zwfycBfGPbP2fWJnR0pn2UUvFZVDP9jpE/pub?gid=269978205&single=true&output=csv",
+        gid: "269978205",
+        name: "Copy of 2007 reformatted",
+        year: 2007,
+      },
+    ]);
+  });
+});
+
+describe("fetchStockbeeMarketMonitorWorkbookRows", () => {
+  it("keeps the richer row when adjacent year sheets contain the same date", async () => {
+    const sheet2014Url =
+      "https://docs.google.com/spreadsheets/d/1O6OhS7ciA8zwfycBfGPbP2fWJnR0pn2UUvFZVDP9jpE/pub?gid=1622090416&single=true&output=csv";
+    const sheet2013Url =
+      "https://docs.google.com/spreadsheets/d/1O6OhS7ciA8zwfycBfGPbP2fWJnR0pn2UUvFZVDP9jpE/pub?gid=299051502&single=true&output=csv";
+    const fetcher = async (url: string) => {
+      if (url === "https://example.test/workbook") {
+        return stockbeeResponse(
+          [
+            'items.push({name: "2014", pageUrl: "https:\\/\\/docs.google.com\\/spreadsheets\\/d\\/1O6OhS7ciA8zwfycBfGPbP2fWJnR0pn2UUvFZVDP9jpE\\/pubhtml\\/sheet?headers\\x3dfalse&gid=1622090416", gid: "1622090416",initialSheet: ("1622090416" == gid)});',
+            'items.push({name: "2013", pageUrl: "https:\\/\\/docs.google.com\\/spreadsheets\\/d\\/1O6OhS7ciA8zwfycBfGPbP2fWJnR0pn2UUvFZVDP9jpE\\/pubhtml\\/sheet?headers\\x3dfalse&gid=299051502", gid: "299051502",initialSheet: ("299051502" == gid)});',
+          ].join(""),
+        );
+      }
+      if (url === sheet2014Url) {
+        return stockbeeResponse(
+          "Date,4% plus daily,4% down daily\n12/31/2013,99,33\n",
+        );
+      }
+      if (url === sheet2013Url) {
+        return stockbeeResponse(
+          "Date,4% plus daily,4% down daily,5 day breadth ratio,10 day breadth ratio,Bottom Day,TNA Vbbee buy/sale,25% plus  quarter,25% down quarter,Primary Breadth Ratio,,25% plus month,25% down month,50% plus month,50% down month,34/13 bull,34/13 bear,Common Stocks,T2108\n12/31/2013,99,33,2.72,3.21,,,928,274,3.39,,93,13,24,1,1208,355,5821,62.67\n",
+        );
+      }
+
+      throw new Error(`Unexpected URL ${url}`);
+    };
+
+    await expect(
+      fetchStockbeeMarketMonitorWorkbookRows({
+        fetcher,
+        workbookUrl: "https://example.test/workbook",
+      }),
+    ).resolves.toEqual([
+      expect.objectContaining({
+        date: "2013-12-31",
+        ratio5Day: 2.72,
+        up25Quarter: 928,
+        up13In34Days: 1208,
+        t2108: 62.67,
       }),
     ]);
   });
@@ -166,5 +295,13 @@ function bar(input: {
     symbol: input.symbol,
     timeframe: "1d",
     volume: 1_000_000,
+  };
+}
+
+function stockbeeResponse(text: string) {
+  return {
+    ok: true,
+    status: 200,
+    text: async () => text,
   };
 }

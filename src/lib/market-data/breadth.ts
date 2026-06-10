@@ -2,9 +2,13 @@ import type { MarketDataProvider, OhlcvBar } from "./types";
 
 export const STOCKBEE_MARKET_MONITOR_URL =
   "https://docs.google.com/spreadsheet/pub?key=0Am_cU8NLIU20dEhiQnVHN3Nnc3B1S3J6eGhKZFo0N3c&output=csv";
+export const STOCKBEE_MARKET_MONITOR_WORKBOOK_URL =
+  "https://docs.google.com/spreadsheet/pub?key=0Am_cU8NLIU20dEhiQnVHN3Nnc3B1S3J6eGhKZFo0N3c&output=html";
 
 const DEFAULT_MARKET_INDEX_SYMBOLS = ["SPY", "QQQ", "IWM", "DIA"] as const;
 const MARKET_INDEX_LOOKBACK_DAYS = 420;
+const STOCKBEE_MARKET_MONITOR_SPREADSHEET_ID =
+  "1O6OhS7ciA8zwfycBfGPbP2fWJnR0pn2UUvFZVDP9jpE";
 
 export type StockbeeBreadthRow = {
   date: string;
@@ -29,6 +33,13 @@ export type MarketBreadthSnapshot = {
   latest: StockbeeBreadthRow | null;
   tableRows: StockbeeBreadthRow[];
   chartRows: StockbeeBreadthRow[];
+};
+
+export type StockbeeMarketMonitorSheet = {
+  csvUrl: string;
+  gid: string;
+  name: string;
+  year: number;
 };
 
 export type MarketIndexBreadthSummary = {
@@ -90,7 +101,44 @@ export async function getStockbeeMarketBreadth(input: {
   );
 }
 
-export function parseStockbeeMarketMonitorCsv(csv: string): StockbeeBreadthRow[] {
+export async function fetchStockbeeMarketMonitorWorkbookRows(input: {
+  fetcher?: BreadthFetcher;
+  workbookUrl?: string;
+} = {}) {
+  const fetcher = input.fetcher ?? fetch;
+  const workbookUrl = input.workbookUrl ?? STOCKBEE_MARKET_MONITOR_WORKBOOK_URL;
+  const response = await fetcher(workbookUrl, { cache: "no-store" });
+
+  if (!response.ok) {
+    throw new Error(`Stockbee Market Monitor request failed with ${response.status}`);
+  }
+
+  const sheets = parseStockbeeMarketMonitorSheets(await response.text());
+  const sheetRows = await Promise.all(
+    sheets.map(async (sheet) => {
+      const sheetResponse = await fetcher(sheet.csvUrl, { cache: "no-store" });
+
+      if (!sheetResponse.ok) {
+        throw new Error(
+          `Stockbee Market Monitor request failed with ${sheetResponse.status}`,
+        );
+      }
+
+      return parseStockbeeMarketMonitorCsv(await sheetResponse.text(), {
+        fallbackYear: sheet.year,
+      });
+    }),
+  );
+
+  return dedupeStockbeeRowsByDate(sheetRows.flat()).sort((left, right) =>
+    right.date.localeCompare(left.date),
+  );
+}
+
+export function parseStockbeeMarketMonitorCsv(
+  csv: string,
+  options: { fallbackYear?: number } = {},
+): StockbeeBreadthRow[] {
   const rows = parseCsv(csv).filter((row) => row.some((cell) => cell.trim() !== ""));
   const headerIndex = rows.findIndex((row) => normalizeHeader(row[0]) === "date");
 
@@ -98,10 +146,58 @@ export function parseStockbeeMarketMonitorCsv(csv: string): StockbeeBreadthRow[]
     return [];
   }
 
+  const columnMap = stockbeeColumnMap(rows[headerIndex]);
+
   return rows
     .slice(headerIndex + 1)
-    .map(rowFromCsv)
+    .map((row) => rowFromCsv(row, columnMap, options.fallbackYear))
     .filter((row): row is StockbeeBreadthRow => row != null);
+}
+
+export function parseStockbeeMarketMonitorSheets(
+  html: string,
+): StockbeeMarketMonitorSheet[] {
+  const sheetsByYear = new Map<
+    number,
+    StockbeeMarketMonitorSheet & { priority: number }
+  >();
+  const itemPattern = /items\.push\(\{name:\s*"([^"]+)"[\s\S]*?gid:\s*"(\d+)"/g;
+
+  for (const match of html.matchAll(itemPattern)) {
+    const name = decodeGooglePublishedSheetString(match[1]);
+    const gid = match[2];
+    const directYear = name.match(/^\d{4}$/);
+    const reformattedYear = name.match(/^Copy of (\d{4}) reformatted$/i);
+    const year = Number(directYear?.[0] ?? reformattedYear?.[1]);
+
+    if (!year) {
+      continue;
+    }
+
+    const priority = reformattedYear ? 1 : 0;
+    const existing = sheetsByYear.get(year);
+
+    if (existing && existing.priority > priority) {
+      continue;
+    }
+
+    sheetsByYear.set(year, {
+      csvUrl: `https://docs.google.com/spreadsheets/d/${STOCKBEE_MARKET_MONITOR_SPREADSHEET_ID}/pub?gid=${gid}&single=true&output=csv`,
+      gid,
+      name,
+      priority,
+      year,
+    });
+  }
+
+  return [...sheetsByYear.values()]
+    .sort((left, right) => right.year - left.year)
+    .map((sheet) => ({
+      csvUrl: sheet.csvUrl,
+      gid: sheet.gid,
+      name: sheet.name,
+      year: sheet.year,
+    }));
 }
 
 export function buildMarketBreadthSnapshot(
@@ -226,8 +322,95 @@ export function summarizeMarketIndexBars(
   };
 }
 
-function rowFromCsv(row: string[]) {
-  const date = dateFromMarketMonitor(row[0]);
+type StockbeeColumnMap = {
+  [key in keyof StockbeeBreadthRow]?: number;
+};
+
+const STOCKBEE_COLUMN_ALIASES: Record<keyof StockbeeBreadthRow, string[]> = {
+  date: ["date"],
+  down13In34Days: [
+    "numberofstocksdown13plusin34days",
+    "3413bear",
+    "mm3413minus",
+  ],
+  down25Month: [
+    "numberofstocksdown25plusinamonth",
+    "numberofstocksdown25inamonth",
+    "25downmonth",
+    "25downmonth",
+  ],
+  down25Quarter: [
+    "numberofstocksdown25plusinaquarter",
+    "numberofstocksdown25inaquarter",
+    "numberofstocks25downplusinaquarter",
+    "25downquarter",
+  ],
+  down4Percent: [
+    "numberofstocksdown4plustoday",
+    "4downdaily",
+    "numberofstocksdown4onhighvolume",
+  ],
+  down50Month: [
+    "numberofstocksdown50plusinamonth",
+    "numberofstocksdown50inamonth",
+    "50downmonth",
+    "50down",
+  ],
+  ratio10Day: [
+    "10dayratio",
+    "10daybreadthratio",
+    "10daybreadthratioof4up4down",
+  ],
+  ratio5Day: [
+    "5dayratio",
+    "5daybreadthratio",
+    "5daybreadthratioof4up4down",
+  ],
+  sp500: ["sp"],
+  t2108: ["t2108", "t2108ofstocksabove40dayma"],
+  universeCount: [
+    "wordencommonstockuniverse",
+    "commonstocks",
+    "numberofstocksinwordencommonstockuniverse",
+    "numberofstocksinwordendatabase",
+    "totalnoetf",
+    "total",
+  ],
+  up13In34Days: [
+    "numberofstocksup13plusin34days",
+    "3413bull",
+    "mm3413plus",
+  ],
+  up25Month: [
+    "numberofstocksup25plusinamonth",
+    "numberofstocksup25inamonth",
+    "25plusmonth",
+    "25month",
+  ],
+  up25Quarter: [
+    "numberofstocksup25plusinaquarter",
+    "numberofstocksup25inaquarter",
+    "25plusquarter",
+  ],
+  up4Percent: [
+    "numberofstocksup4plustoday",
+    "4plusdaily",
+    "numberofstocksup4onhighvolume",
+  ],
+  up50Month: [
+    "numberofstocksup50plusinamonth",
+    "numberofstocksup50inamonth",
+    "50plusmonth",
+    "50up",
+  ],
+};
+
+function rowFromCsv(
+  row: string[],
+  columnMap: StockbeeColumnMap,
+  fallbackYear: number | undefined,
+) {
+  const date = dateFromMarketMonitor(row[columnMap.date ?? 0], fallbackYear);
 
   if (!date) {
     return null;
@@ -235,21 +418,21 @@ function rowFromCsv(row: string[]) {
 
   return {
     date,
-    up4Percent: numberFromCell(row[1]),
-    down4Percent: numberFromCell(row[2]),
-    ratio5Day: numberFromCell(row[3]),
-    ratio10Day: numberFromCell(row[4]),
-    up25Quarter: numberFromCell(row[5]),
-    down25Quarter: numberFromCell(row[6]),
-    up25Month: numberFromCell(row[7]),
-    down25Month: numberFromCell(row[8]),
-    up50Month: numberFromCell(row[9]),
-    down50Month: numberFromCell(row[10]),
-    up13In34Days: numberFromCell(row[11]),
-    down13In34Days: numberFromCell(row[12]),
-    universeCount: numberFromCell(row[13]),
-    t2108: numberFromCell(row[14]),
-    sp500: numberFromCell(row[15]),
+    up4Percent: numberFromCell(row[columnMap.up4Percent ?? -1]),
+    down4Percent: numberFromCell(row[columnMap.down4Percent ?? -1]),
+    ratio5Day: numberFromCell(row[columnMap.ratio5Day ?? -1]),
+    ratio10Day: numberFromCell(row[columnMap.ratio10Day ?? -1]),
+    up25Quarter: numberFromCell(row[columnMap.up25Quarter ?? -1]),
+    down25Quarter: numberFromCell(row[columnMap.down25Quarter ?? -1]),
+    up25Month: numberFromCell(row[columnMap.up25Month ?? -1]),
+    down25Month: numberFromCell(row[columnMap.down25Month ?? -1]),
+    up50Month: numberFromCell(row[columnMap.up50Month ?? -1]),
+    down50Month: numberFromCell(row[columnMap.down50Month ?? -1]),
+    up13In34Days: numberFromCell(row[columnMap.up13In34Days ?? -1]),
+    down13In34Days: numberFromCell(row[columnMap.down13In34Days ?? -1]),
+    universeCount: numberFromCell(row[columnMap.universeCount ?? -1]),
+    t2108: numberFromCell(row[columnMap.t2108 ?? -1]),
+    sp500: numberFromCell(row[columnMap.sp500 ?? -1]),
   };
 }
 
@@ -299,10 +482,53 @@ function parseCsv(csv: string) {
   return rows;
 }
 
-function dateFromMarketMonitor(value: string) {
-  const [month, day, year] = value.trim().split("/").map((part) => Number(part));
+function stockbeeColumnMap(headers: string[]) {
+  const normalizedHeaders = headers.map(normalizeHeader);
+  const map: StockbeeColumnMap = {};
 
-  if (!month || !day || !year) {
+  for (const [field, aliases] of Object.entries(STOCKBEE_COLUMN_ALIASES) as [
+    keyof StockbeeBreadthRow,
+    string[],
+  ][]) {
+    const index = normalizedHeaders.findIndex((header) =>
+      aliases.includes(header),
+    );
+
+    if (index >= 0) {
+      map[field] = index;
+    }
+  }
+
+  return map;
+}
+
+function dateFromMarketMonitor(value: string | undefined, fallbackYear?: number) {
+  const parts = (value ?? "")
+    .trim()
+    .split(/[/.]/)
+    .map((part) => Number(part));
+  let [month, day, year] = parts;
+
+  if (!month || !day || (!year && !fallbackYear)) {
+    return null;
+  }
+
+  if (month > 12 && day <= 12) {
+    [month, day] = [day, month];
+  }
+
+  if (!year) {
+    if (!fallbackYear) {
+      return null;
+    }
+    year = fallbackYear;
+  } else if (year < 100) {
+    year += 2000;
+  } else if (fallbackYear && (year < 2000 || year > new Date().getUTCFullYear() + 1)) {
+    year = fallbackYear;
+  }
+
+  if (!year || !validDateParts(year, month, day)) {
     return null;
   }
 
@@ -316,7 +542,51 @@ function numberFromCell(value: string | undefined) {
 }
 
 function normalizeHeader(value: string) {
-  return value.trim().toLowerCase();
+  return value
+    .trim()
+    .toLowerCase()
+    .replaceAll("#", "number")
+    .replaceAll("+", "plus")
+    .replaceAll("-", "minus")
+    .replaceAll("&", "")
+    .replaceAll(">", "")
+    .replace(/[^a-z0-9]+/g, "");
+}
+
+function decodeGooglePublishedSheetString(value: string) {
+  return value.replaceAll("\\/", "/").replace(/\\x([0-9a-f]{2})/gi, (_, hex) =>
+    String.fromCharCode(Number.parseInt(hex, 16)),
+  );
+}
+
+function dedupeStockbeeRowsByDate(rows: StockbeeBreadthRow[]) {
+  const byDate = new Map<string, StockbeeBreadthRow>();
+
+  for (const row of rows) {
+    const existing = byDate.get(row.date);
+
+    if (!existing || stockbeeRowScore(row) > stockbeeRowScore(existing)) {
+      byDate.set(row.date, row);
+    }
+  }
+
+  return [...byDate.values()];
+}
+
+function stockbeeRowScore(row: StockbeeBreadthRow) {
+  return Object.entries(row).filter(
+    ([field, value]) => field !== "date" && typeof value === "number" && value !== 0,
+  ).length;
+}
+
+function validDateParts(year: number, month: number, day: number) {
+  const date = new Date(Date.UTC(year, month - 1, day));
+
+  return (
+    date.getUTCFullYear() === year &&
+    date.getUTCMonth() === month - 1 &&
+    date.getUTCDate() === day
+  );
 }
 
 function averageTail(values: number[], period: number) {
