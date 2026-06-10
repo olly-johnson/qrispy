@@ -1,4 +1,4 @@
-import { readFileSync } from "node:fs";
+import { readFileSync, readdirSync } from "node:fs";
 import { join } from "node:path";
 
 import { describe, expect, it } from "vitest";
@@ -116,5 +116,42 @@ describe("Trade stop groups migration", () => {
     );
     expect(sql).toContain("owner can select trade stop groups");
     expect(sql).toContain("owner can update trade stop groups");
+  });
+});
+
+describe("Stockbee breadth rows migration", () => {
+  it("adds persisted raw Stockbee rows with authenticated read access", () => {
+    const migrationName = readdirSync(
+      join(process.cwd(), "supabase", "migrations"),
+    ).find((name) => name.endsWith("_add_stockbee_breadth_rows.sql"));
+    expect(migrationName).toBeDefined();
+
+    const sql = readFileSync(
+      join(process.cwd(), "supabase", "migrations", migrationName!),
+      "utf8",
+    );
+
+    expect(sql).toContain("create table public.stockbee_breadth_rows");
+    expect(sql).toContain("date date primary key");
+    expect(sql).toContain("up_4_percent numeric not null");
+    expect(sql).toContain("down_4_percent numeric not null");
+    expect(sql).toContain("ratio_5_day numeric not null");
+    expect(sql).toContain("ratio_10_day numeric not null");
+    expect(sql).toContain("up_13_in_34_days numeric not null");
+    expect(sql).toContain("down_13_in_34_days numeric not null");
+    expect(sql).toContain("source_url text not null");
+    expect(sql).toContain("source_fetched_at timestamptz not null");
+    expect(sql).toContain("stockbee_breadth_rows_date_desc_idx");
+    expect(sql).toContain(
+      "alter table public.stockbee_breadth_rows enable row level security",
+    );
+    expect(sql).toContain(
+      "grant select on table public.stockbee_breadth_rows to authenticated",
+    );
+    expect(sql).toContain(
+      "grant select, insert, update, delete on table public.stockbee_breadth_rows to service_role",
+    );
+    expect(sql).toContain("authenticated can select stockbee breadth rows");
+    expect(sql).toContain("using (true)");
   });
 });
