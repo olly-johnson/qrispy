@@ -1,8 +1,32 @@
-import type { StockbeeBreadthRow } from "./breadth";
+import {
+  buildMarketBreadthSnapshot,
+  parseStockbeeMarketMonitorCsv,
+  STOCKBEE_MARKET_MONITOR_URL,
+  type MarketBreadthSnapshot,
+  type StockbeeBreadthRow,
+} from "./breadth";
 
 export type StockbeeBreadthYearGroup = {
   rows: StockbeeBreadthRow[];
   year: string;
+};
+
+type StockbeeFetcher = (
+  input: string,
+  init?: RequestInit,
+) => Promise<{
+  ok: boolean;
+  status: number;
+  text(): Promise<string>;
+}>;
+
+export type StockbeeBreadthHistory = {
+  groups: StockbeeBreadthYearGroup[];
+  liveRows: StockbeeBreadthRow[];
+  selectedRows: StockbeeBreadthRow[];
+  selectedYear: string | null;
+  snapshot: MarketBreadthSnapshot;
+  syncError: string | null;
 };
 
 type StockbeeBreadthClient = {
@@ -19,6 +43,62 @@ type StockbeeBreadthClient = {
     ): Promise<{ error: unknown }>;
   };
 };
+
+export async function loadStockbeeBreadthHistory(input: {
+  client: unknown;
+  fetcher?: StockbeeFetcher;
+  requestedYear?: string;
+  sourceUrl?: string;
+}): Promise<StockbeeBreadthHistory> {
+  const fetcher = input.fetcher ?? fetch;
+  const sourceUrl = input.sourceUrl ?? STOCKBEE_MARKET_MONITOR_URL;
+  let liveRows: StockbeeBreadthRow[] = [];
+  let syncError: string | null = null;
+
+  try {
+    const response = await fetcher(sourceUrl, { cache: "no-store" });
+
+    if (!response.ok) {
+      throw new Error(
+        `Stockbee Market Monitor request failed with ${response.status}`,
+      );
+    }
+
+    liveRows = parseStockbeeMarketMonitorCsv(await response.text());
+    await syncStockbeeBreadthRows({
+      client: input.client,
+      fetchedAt: new Date(),
+      rows: liveRows,
+      sourceUrl,
+    });
+  } catch (error) {
+    syncError = errorMessage(error);
+  }
+
+  let persistedRows: StockbeeBreadthRow[];
+
+  try {
+    persistedRows = await readStockbeeBreadthRows({ client: input.client });
+  } catch (error) {
+    persistedRows = liveRows;
+    syncError = `Persisted Stockbee history unavailable: ${errorMessage(error)}`;
+  }
+
+  const sourceRows = persistedRows.length > 0 ? persistedRows : liveRows;
+  const groups = groupStockbeeBreadthRowsByYear(sourceRows);
+  const selectedYear = selectedStockbeeBreadthYear(groups, input.requestedYear);
+  const selectedRows =
+    groups.find((group) => group.year === selectedYear)?.rows ?? [];
+
+  return {
+    groups,
+    liveRows,
+    selectedRows,
+    selectedYear,
+    snapshot: buildMarketBreadthSnapshot(sourceRows),
+    syncError,
+  };
+}
 
 export function stockbeeBreadthUpsertPayload(
   row: StockbeeBreadthRow,
@@ -147,4 +227,8 @@ function numberOrZero(value: unknown) {
   }
 
   return 0;
+}
+
+function errorMessage(error: unknown) {
+  return error instanceof Error ? error.message : String(error);
 }

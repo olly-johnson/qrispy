@@ -2,6 +2,7 @@ import { describe, expect, it, vi } from "vitest";
 
 import {
   groupStockbeeBreadthRowsByYear,
+  loadStockbeeBreadthHistory,
   readStockbeeBreadthRows,
   selectedStockbeeBreadthYear,
   stockbeeBreadthUpsertPayload,
@@ -125,6 +126,88 @@ describe("selectedStockbeeBreadthYear", () => {
   });
 });
 
+describe("loadStockbeeBreadthHistory", () => {
+  it("syncs live rows, then renders persisted rows grouped by selected year", async () => {
+    const persisted = [
+      storedRow({ date: "2026-06-10" }),
+      storedRow({ date: "2025-12-31" }),
+    ];
+    const client = fakeStockbeeClient(persisted);
+    const fetcher = vi.fn().mockResolvedValue({
+      ok: true,
+      status: 200,
+      text: async () => csvForDates(["6/10/2026", "12/31/2025"]),
+    });
+
+    await expect(
+      loadStockbeeBreadthHistory({
+        client,
+        fetcher,
+        requestedYear: "2025",
+        sourceUrl,
+      }),
+    ).resolves.toMatchObject({
+      groups: [
+        { rows: [row({ date: "2026-06-10" })], year: "2026" },
+        { rows: [row({ date: "2025-12-31" })], year: "2025" },
+      ],
+      liveRows: [row({ date: "2026-06-10" }), row({ date: "2025-12-31" })],
+      selectedRows: [row({ date: "2025-12-31" })],
+      selectedYear: "2025",
+      syncError: null,
+    });
+    expect(client.upsertedRows.map((item) => item.date)).toEqual([
+      "2026-06-10",
+      "2025-12-31",
+    ]);
+  });
+
+  it("falls back to persisted rows when live Stockbee fetch fails", async () => {
+    const client = fakeStockbeeClient([storedRow({ date: "2026-06-10" })]);
+    const fetcher = vi.fn().mockResolvedValue({
+      ok: false,
+      status: 503,
+      text: async () => "",
+    });
+
+    const result = await loadStockbeeBreadthHistory({
+      client,
+      fetcher,
+      requestedYear: undefined,
+      sourceUrl,
+    });
+
+    expect(result.syncError).toBe(
+      "Stockbee Market Monitor request failed with 503",
+    );
+    expect(result.selectedRows).toEqual([row({ date: "2026-06-10" })]);
+    expect(client.upsertedRows).toEqual([]);
+  });
+
+  it("falls back to live rows when persisted read fails after a successful fetch", async () => {
+    const client = fakeStockbeeClient([], {
+      readError: new Error("database unavailable"),
+    });
+    const fetcher = vi.fn().mockResolvedValue({
+      ok: true,
+      status: 200,
+      text: async () => csvForDates(["6/10/2026"]),
+    });
+
+    const result = await loadStockbeeBreadthHistory({
+      client,
+      fetcher,
+      requestedYear: undefined,
+      sourceUrl,
+    });
+
+    expect(result.syncError).toBe(
+      "Persisted Stockbee history unavailable: database unavailable",
+    );
+    expect(result.selectedRows).toEqual([row({ date: "2026-06-10" })]);
+  });
+});
+
 function row(overrides: Partial<StockbeeBreadthRow> = {}): StockbeeBreadthRow {
   return {
     date: "2026-06-10",
@@ -147,7 +230,43 @@ function row(overrides: Partial<StockbeeBreadthRow> = {}): StockbeeBreadthRow {
   };
 }
 
-function fakeStockbeeClient(storedRows: Record<string, unknown>[]) {
+function storedRow(overrides: Partial<StockbeeBreadthRow> = {}) {
+  const item = row(overrides);
+
+  return {
+    date: item.date,
+    down_13_in_34_days: item.down13In34Days,
+    down_25_month: item.down25Month,
+    down_25_quarter: item.down25Quarter,
+    down_4_percent: item.down4Percent,
+    down_50_month: item.down50Month,
+    ratio_10_day: item.ratio10Day,
+    ratio_5_day: item.ratio5Day,
+    sp500: item.sp500,
+    t2108: item.t2108,
+    universe_count: item.universeCount,
+    up_13_in_34_days: item.up13In34Days,
+    up_25_month: item.up25Month,
+    up_25_quarter: item.up25Quarter,
+    up_4_percent: item.up4Percent,
+    up_50_month: item.up50Month,
+  };
+}
+
+function csvForDates(dates: string[]) {
+  return [
+    "Date,Number of stocks up 4% plus today,Number of stocks down 4% plus today,5 day ratio,10 day  ratio ,Number of stocks up 25% plus in a quarter,Number of stocks down 25% + in a quarter,Number of stocks up 25% + in a month,Number of stocks down 25% + in a month,Number of stocks up 50% + in a month,Number of stocks down 50% + in a month,Number of stocks up 13% + in 34 days,Number of stocks down 13% + in 34 days, Worden Common stock universe,T2108 ,S&P",
+    ...dates.map(
+      (date) =>
+        `${date},1,2,1.1,1.2,3,4,5,6,7,8,10,11,6462,39.31,"7,553.68"`,
+    ),
+  ].join("\n");
+}
+
+function fakeStockbeeClient(
+  storedRows: Record<string, unknown>[],
+  options: { readError?: unknown } = {},
+) {
   const client = {
     orderCall: null as unknown,
     upsertedRows: [] as Record<string, unknown>[],
@@ -157,9 +276,12 @@ function fakeStockbeeClient(storedRows: Record<string, unknown>[]) {
 
       return {
         select: () => ({
-          order: vi.fn((column, options) => {
-            client.orderCall = [column, options];
-            return Promise.resolve({ data: storedRows, error: null });
+          order: vi.fn((column, orderOptions) => {
+            client.orderCall = [column, orderOptions];
+            return Promise.resolve({
+              data: options.readError ? null : storedRows,
+              error: options.readError ?? null,
+            });
           }),
         }),
         upsert: vi.fn((rows, options) => {
