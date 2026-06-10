@@ -162,6 +162,48 @@ describe("loadStockbeeBreadthHistory", () => {
     ]);
   });
 
+  it("syncs rows from every discovered workbook year sheet by default", async () => {
+    const client = fakeStockbeeClient([
+      storedRow({ date: "2026-06-10" }),
+      storedRow({ date: "2008-12-31" }),
+    ]);
+    const fetcher = vi.fn(async (url: string) => {
+      if (url.endsWith("output=html")) {
+        return response(
+          [
+            'items.push({name: "2026", pageUrl: "https:\\/\\/docs.google.com\\/spreadsheets\\/d\\/1O6OhS7ciA8zwfycBfGPbP2fWJnR0pn2UUvFZVDP9jpE\\/pubhtml\\/sheet?headers\\x3dfalse&gid=1082103394", gid: "1082103394",initialSheet: ("1082103394" == gid)});',
+            'items.push({name: "Copy of 2008 reformatted", pageUrl: "https:\\/\\/docs.google.com\\/spreadsheets\\/d\\/1O6OhS7ciA8zwfycBfGPbP2fWJnR0pn2UUvFZVDP9jpE\\/pubhtml\\/sheet?headers\\x3dfalse&gid=1770823350", gid: "1770823350",initialSheet: ("1770823350" == gid)});',
+          ].join(""),
+        );
+      }
+
+      if (url.includes("gid=1082103394")) {
+        return response(csvForDates(["6/10/2026"]));
+      }
+
+      return response(
+        "Date,# of Stocks Up >4%  on high volume,# of stocks down >4%  on high volume,Oscillator % ratio,Primary Indicator,# of stocks up >25% in a quarter,# of stocks down >25% in a quarter,Oscillator % ratio,Secondary Indicators,# of stocks up >50% in a month,# of stocks down >50% in a month,,# of stocks up >25% in a month,# of stocks down >25% in a month,,# of stocks up >100% in a year,# of stocks up >200% in a year,,MM 34/13 +,MM 34/13 -,,,# of stocks in Worden Database\n12/31,952,92,,,2849,2415,,,74,11,,533,68,,304,54,,3780,1202,,,6172\n",
+      );
+    });
+
+    const result = await loadStockbeeBreadthHistory({
+      client,
+      fetcher,
+      requestedYear: "2008",
+    });
+
+    expect(result.syncError).toBeNull();
+    expect(result.liveRows.map((item) => item.date)).toEqual([
+      "2026-06-10",
+      "2008-12-31",
+    ]);
+    expect(result.selectedRows).toEqual([row({ date: "2008-12-31" })]);
+    expect(client.upsertedRows.map((item) => item.date)).toEqual([
+      "2026-06-10",
+      "2008-12-31",
+    ]);
+  });
+
   it("falls back to persisted rows when live Stockbee fetch fails", async () => {
     const client = fakeStockbeeClient([storedRow({ date: "2026-06-10" })]);
     const fetcher = vi.fn().mockResolvedValue({
@@ -287,6 +329,14 @@ function csvForDates(dates: string[]) {
         `${date},1,2,1.1,1.2,3,4,5,6,7,8,10,11,6462,39.31,"7,553.68"`,
     ),
   ].join("\n");
+}
+
+function response(text: string) {
+  return {
+    ok: true,
+    status: 200,
+    text: async () => text,
+  };
 }
 
 function fakeStockbeeClient(

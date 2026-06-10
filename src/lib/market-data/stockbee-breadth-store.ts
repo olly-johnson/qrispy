@@ -1,7 +1,9 @@
 import {
   buildMarketBreadthSnapshot,
+  fetchStockbeeMarketMonitorWorkbookRows,
   parseStockbeeMarketMonitorCsv,
   STOCKBEE_MARKET_MONITOR_URL,
+  STOCKBEE_MARKET_MONITOR_WORKBOOK_URL,
   type MarketBreadthSnapshot,
   type StockbeeBreadthRow,
 } from "./breadth";
@@ -56,20 +58,24 @@ export async function loadStockbeeBreadthHistory(input: {
   let syncError: string | null = null;
 
   try {
-    const response = await fetcher(sourceUrl, { cache: "no-store" });
+    if (input.sourceUrl) {
+      const response = await fetcher(sourceUrl, { cache: "no-store" });
 
-    if (!response.ok) {
-      throw new Error(
-        `Stockbee Market Monitor request failed with ${response.status}`,
-      );
+      if (!response.ok) {
+        throw new Error(
+          `Stockbee Market Monitor request failed with ${response.status}`,
+        );
+      }
+
+      liveRows = parseStockbeeMarketMonitorCsv(await response.text());
+    } else {
+      liveRows = await fetchStockbeeMarketMonitorWorkbookRows({ fetcher });
     }
-
-    liveRows = parseStockbeeMarketMonitorCsv(await response.text());
     await syncStockbeeBreadthRows({
       client: input.client,
       fetchedAt: new Date(),
       rows: liveRows,
-      sourceUrl,
+      sourceUrl: input.sourceUrl ?? STOCKBEE_MARKET_MONITOR_WORKBOOK_URL,
     });
   } catch (error) {
     syncError = errorMessage(error);
