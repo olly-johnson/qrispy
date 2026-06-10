@@ -5,12 +5,16 @@ import { AppShell } from "@/components/app-shell";
 import { requireUser } from "@/lib/auth/session";
 import {
   getMarketIndexBreadthSummaries,
-  getStockbeeMarketBreadth,
   type MarketBreadthSnapshot,
   type MarketIndexBreadthSummary,
   type StockbeeBreadthRow,
 } from "@/lib/market-data/breadth";
 import { createMassiveMarketDataProvider } from "@/lib/market-data/massive";
+import {
+  loadStockbeeBreadthHistory,
+  type StockbeeBreadthYearGroup,
+} from "@/lib/market-data/stockbee-breadth-store";
+import { createSupabaseAdminClient } from "@/lib/supabase/server";
 
 export const dynamic = "force-dynamic";
 
@@ -18,10 +22,16 @@ const STOCKBEE_PAGE_URL = "https://stockbee.blogspot.com/p/mm.html";
 const STOCKCHARTS_NYMO_IMAGE_URL = "/api/market-breadth/stockcharts/nymo";
 const STOCKCHARTS_NASI_IMAGE_URL = "/api/market-breadth/stockcharts/nasi";
 
-export default async function MarketBreadthPage() {
+export default async function MarketBreadthPage({
+  searchParams,
+}: {
+  searchParams: Promise<{ [key: string]: string | string[] | undefined }>;
+}) {
   const user = await requireUser();
+  const params = await searchParams;
+  const requestedYear = firstParam(params.year);
   const [breadthResult, indexCards] = await Promise.all([
-    loadBreadthSnapshot(),
+    loadBreadthHistory(requestedYear),
     loadMarketIndexCards(),
   ]);
 
@@ -53,7 +63,11 @@ export default async function MarketBreadthPage() {
 
       <BreadthCharts snapshot={breadthResult.snapshot} />
       <StockChartsPanels />
-      <BreadthTable rows={breadthResult.snapshot.tableRows} />
+      <BreadthTable
+        groups={breadthResult.groups}
+        rows={breadthResult.selectedRows}
+        selectedYear={breadthResult.selectedYear}
+      />
     </AppShell>
   );
 }
@@ -68,18 +82,31 @@ async function loadMarketIndexCards() {
   }
 }
 
-async function loadBreadthSnapshot() {
-  try {
+async function loadBreadthHistory(requestedYear: string | undefined) {
+  const client = createSupabaseAdminClient();
+
+  if (!client) {
     return {
-      snapshot: await getStockbeeMarketBreadth(),
-      error: null,
-    };
-  } catch (error) {
-    return {
+      groups: [],
+      selectedRows: [],
+      selectedYear: null,
       snapshot: { latest: null, tableRows: [], chartRows: [] } satisfies MarketBreadthSnapshot,
-      error: `Stockbee Market Monitor unavailable: ${errorMessage(error)}`,
+      error: "Supabase service role is not configured, so Stockbee history cannot be persisted.",
     };
   }
+
+  const history = await loadStockbeeBreadthHistory({
+    client,
+    requestedYear,
+  });
+
+  return {
+    groups: history.groups,
+    selectedRows: history.selectedRows,
+    selectedYear: history.selectedYear,
+    snapshot: history.snapshot,
+    error: history.syncError,
+  };
 }
 
 function IndexStatusCard({ summary }: { summary: MarketIndexBreadthSummary }) {
@@ -461,13 +488,38 @@ function StockChartPanel({
   );
 }
 
-function BreadthTable({ rows }: { rows: StockbeeBreadthRow[] }) {
+function BreadthTable({
+  groups,
+  rows,
+  selectedYear,
+}: {
+  groups: StockbeeBreadthYearGroup[];
+  rows: StockbeeBreadthRow[];
+  selectedYear: string | null;
+}) {
   return (
     <section className="mt-4 rounded-md border border-white/10 bg-white/[0.04] p-4">
-      <h2 className="text-base font-semibold">Stockbee Market Monitor - Last 30 Days</h2>
-      <div className="mt-4 overflow-x-auto">
+      <div className="flex flex-wrap items-center justify-between gap-3">
+        <h2 className="text-base font-semibold">Stockbee Market Monitor History</h2>
+        <div className="flex flex-wrap gap-2">
+          {groups.map((group) => (
+            <Link
+              className={`rounded-md px-3 py-1.5 text-sm font-semibold transition ${
+                group.year === selectedYear
+                  ? "bg-cyan-300 text-zinc-950"
+                  : "bg-white/[0.06] text-zinc-300 hover:bg-white/[0.1] hover:text-white"
+              }`}
+              href={`/market-breadth?year=${group.year}`}
+              key={group.year}
+            >
+              {group.year}
+            </Link>
+          ))}
+        </div>
+      </div>
+      <div className="mt-4 max-h-[720px] overflow-auto">
         <table className="w-full min-w-[1160px] border-separate border-spacing-0 text-left text-sm">
-          <thead className="text-xs text-zinc-400">
+          <thead className="sticky top-0 bg-[#0d1117] text-xs text-zinc-400">
             <tr>
               {[
                 "Date",
@@ -627,6 +679,6 @@ function formatMarketPrice(value: number | null) {
   }).format(value);
 }
 
-function errorMessage(error: unknown) {
-  return error instanceof Error ? error.message : String(error);
+function firstParam(value: string | string[] | undefined) {
+  return Array.isArray(value) ? value[0] : value;
 }
