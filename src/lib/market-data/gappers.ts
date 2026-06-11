@@ -2,6 +2,10 @@ import type {
   MassiveReferenceTicker,
   MassiveSnapshotTicker,
 } from "./massive";
+import {
+  buildCommonStockUniverse,
+  normalizeMarketSnapshotTicker,
+} from "./market-universe";
 import type { MarketDataRequest, OhlcvBar } from "./types";
 
 export type GappersMode = "extended" | "regular";
@@ -186,6 +190,10 @@ async function withExtendedHoursVolume(
 function buildUniverse(references: MassiveReferenceTicker[]) {
   const universe = new Map<string, { name: string; securityType: GappersSecurityType }>();
 
+  for (const item of buildCommonStockUniverse(references).values()) {
+    universe.set(item.symbol, { name: item.name, securityType: "Stock" });
+  }
+
   for (const item of references) {
     const symbol = String(item.ticker ?? "").toUpperCase();
     const type = String(item.type ?? "").toUpperCase();
@@ -196,9 +204,6 @@ function buildUniverse(references: MassiveReferenceTicker[]) {
       continue;
     }
 
-    if (type === "CS") {
-      universe.set(symbol, { name: item.name ?? symbol, securityType: "Stock" });
-    }
     if (type === "ETF") {
       universe.set(symbol, { name: item.name ?? symbol, securityType: "ETF" });
     }
@@ -212,20 +217,9 @@ function normalizeCandidate(
   reference: { name: string; securityType: GappersSecurityType } | undefined,
   options: { usePreviousSessionVolumeFallback: boolean },
 ): Omit<GappersRow, "previousCloseAt"> | null {
-  const symbol = String(snapshot.ticker ?? "").toUpperCase();
-  const price = firstFiniteNumber([
-    getPath(snapshot, ["fmv"]),
-    getPath(snapshot, ["lastTrade", "p"]),
-    getPath(snapshot, ["last_trade", "price"]),
-    getPath(snapshot, ["min", "c"]),
-    getPath(snapshot, ["day", "c"]),
-  ]);
-  const previousClose = firstFiniteNumber([
-    getPath(snapshot, ["prevDay", "c"]),
-    getPath(snapshot, ["session", "previous_close"]),
-  ]);
+  const normalized = normalizeMarketSnapshotTicker(snapshot);
 
-  if (!symbol || !reference || price == null || previousClose == null || previousClose <= 0) {
+  if (!normalized || !reference) {
     return null;
   }
 
@@ -246,18 +240,19 @@ function normalizeCandidate(
     previousRegularVolume != null
       ? previousRegularVolume
       : currentRegularVolume;
-  const updated = firstFiniteNumber([snapshot.updated, snapshot.last_updated]);
 
   return {
-    activeDollarVolume: activeVolume * price,
+    activeDollarVolume: activeVolume * normalized.price,
     activeVolume,
-    gapPercent: ((price - previousClose) / previousClose) * 100,
-    lastUpdatedAt: updated == null ? null : timestampToIso(updated),
+    gapPercent:
+      ((normalized.price - normalized.previousClose) / normalized.previousClose) *
+      100,
+    lastUpdatedAt: normalized.lastUpdatedAt,
     name: reference.name,
-    previousClose,
-    price,
+    previousClose: normalized.previousClose,
+    price: normalized.price,
     securityType: reference.securityType,
-    symbol,
+    symbol: normalized.symbol,
   };
 }
 
@@ -319,12 +314,6 @@ function numberFrom(value: unknown) {
   }
 
   return null;
-}
-
-function timestampToIso(value: number) {
-  const milliseconds = value > 10_000_000_000_000 ? Math.floor(value / 1_000_000) : value;
-
-  return new Date(milliseconds).toISOString();
 }
 
 function easternDateParts(value: Date) {

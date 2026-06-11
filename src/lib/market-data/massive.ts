@@ -35,6 +35,14 @@ export type MassiveNewsArticle = {
   title: string;
 };
 
+export type MassiveTickerDetails = {
+  active: boolean | null;
+  name: string | null;
+  sicCode: string | null;
+  sicDescription: string | null;
+  ticker: string;
+};
+
 const TIMEFRAME_PATH: Record<MarketDataTimeframe, { multiplier: number; timespan: string }> = {
   "1d": { multiplier: 1, timespan: "day" },
   "1w": { multiplier: 1, timespan: "week" },
@@ -114,6 +122,34 @@ export class MassiveMarketDataProvider implements MarketDataProvider {
     return Array.isArray(payload.tickers)
       ? (payload.tickers as MassiveSnapshotTicker[])
       : [];
+  }
+
+  async getTickerDetails(ticker: string): Promise<MassiveTickerDetails> {
+    const symbol = ticker.toUpperCase();
+    const url = new URL(`${this.baseUrl}/v3/reference/tickers/${symbol}`);
+    url.searchParams.set("apiKey", this.apiKey);
+
+    const response = await this.fetcher(url.toString(), { cache: "no-store" });
+
+    if (!response.ok) {
+      throw new Error(
+        `Massive ticker details request failed with ${response.status}`,
+      );
+    }
+
+    const payload = (await response.json()) as {
+      results?: Record<string, unknown>;
+    };
+    const row = payload.results ?? {};
+
+    return {
+      active: typeof row.active === "boolean" ? row.active : null,
+      name: typeof row.name === "string" ? row.name : null,
+      sicCode: typeof row.sic_code === "string" ? row.sic_code : null,
+      sicDescription:
+        typeof row.sic_description === "string" ? row.sic_description : null,
+      ticker: String(row.ticker ?? symbol).toUpperCase(),
+    };
   }
 
   async getTickerNews({
