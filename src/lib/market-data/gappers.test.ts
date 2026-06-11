@@ -106,6 +106,38 @@ describe("buildGappersSnapshot", () => {
     });
   });
 
+  it("does not fetch extended-hours volume for rows below the server gap floor", async () => {
+    const provider = providerWith({
+      aggregateBars: {
+        HIGH: [bar("HIGH", "2026-06-04T12:00:00.000Z", 10.7, 20_000)],
+        LOW: [bar("LOW", "2026-06-04T12:00:00.000Z", 10.5, 999_999)],
+      },
+      snapshots: [
+        snapshot("LOW", { price: 10.5, previousClose: 10, regularVolume: 0 }),
+        snapshot("HIGH", { price: 10.7, previousClose: 10, regularVolume: 0 }),
+      ],
+      tickers: [
+        ticker("LOW", "Low Gap Corp", "CS", "stocks"),
+        ticker("HIGH", "High Gap Corp", "CS", "stocks"),
+      ],
+    });
+
+    const result = await buildGappersSnapshot({
+      now: new Date("2026-06-04T12:00:00.000Z"),
+      provider,
+    });
+
+    expect(result.error).toBeNull();
+    expect(result.rows.map((row) => row.symbol)).toEqual(["HIGH"]);
+    expect(provider.getAggregateBars).toHaveBeenCalledTimes(2);
+    expect(provider.getAggregateBars).toHaveBeenCalledWith(
+      expect.objectContaining({ symbol: "HIGH" }),
+    );
+    expect(provider.getAggregateBars).not.toHaveBeenCalledWith(
+      expect.objectContaining({ symbol: "LOW" }),
+    );
+  });
+
   it("uses regular-session volume outside premarket and keeps sorting by dollar volume", async () => {
     const provider = providerWith({
       aggregateBars: {},

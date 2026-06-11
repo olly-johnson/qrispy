@@ -44,7 +44,7 @@ type ExtendedHoursWindow = {
 
 const EASTERN_TIME_ZONE = "America/New_York";
 const MIN_SERVER_PRICE = 0.5;
-const MIN_SERVER_GAP_PERCENT = 0;
+const MIN_SERVER_GAP_PERCENT = 6;
 
 export async function buildGappersSnapshot({
   now = new Date(),
