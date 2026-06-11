@@ -147,6 +147,7 @@ export function createOpenAiNewsSummaryProvider({
                     "Use only the supplied news articles.",
                     "Do not infer missing numbers.",
                     "Return null for unavailable numeric or guidance fields.",
+                    "Guidance fields must be YoY percentage strings only; return null when guidance is only given as absolute EPS or revenue values.",
                     `Symbol: ${input.symbol}`,
                     `Previous close cutoff: ${input.previousCloseAt}`,
                     `Articles: ${JSON.stringify(input.news)}`,
@@ -224,8 +225,8 @@ export function renderGapperNewsSummary(
   return [
     `Adjusted EPS ${formatCurrency(eps.actual, 2)} / YoY ${formatPercent(calculateChangePercent(eps.actual, eps.priorYear))} / Beat ${formatPercent(calculateChangePercent(eps.actual, eps.estimate))}`,
     `Rev ${formatLargeCurrency(revenue.actual)} / YoY ${formatPercent(calculateChangePercent(revenue.actual, revenue.priorYear))} / Beat ${formatPercent(calculateChangePercent(revenue.actual, revenue.estimate))}`,
-    `Guidance Next Quarter: EPS ${extracted.nextQuarterGuidance.eps ?? "NA"} / Rev ${extracted.nextQuarterGuidance.revenue ?? "NA"}`,
-    `Full year guidance: EPS ${extracted.fullYearGuidance.eps ?? "NA"} / Rev ${extracted.fullYearGuidance.revenue ?? "NA"}`,
+    `Guidance Next Quarter: EPS YoY ${extracted.nextQuarterGuidance.eps ?? "NA"} / Rev YoY ${extracted.nextQuarterGuidance.revenue ?? "NA"}`,
+    `Full year guidance: EPS YoY ${extracted.fullYearGuidance.eps ?? "NA"} / Rev YoY ${extracted.fullYearGuidance.revenue ?? "NA"}`,
     `Notable News: ${notableNews}`,
     "Other Catalysts:",
     catalysts,

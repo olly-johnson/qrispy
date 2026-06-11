@@ -48,7 +48,7 @@ describe("renderGapperNewsSummary", () => {
           priorYear: 107_600_000,
         },
       },
-      fullYearGuidance: { eps: null, revenue: "25%" },
+      fullYearGuidance: { eps: null, revenue: "25% YoY" },
       nextQuarterGuidance: { eps: "30% - 100%", revenue: "6% - 10%" },
       notableNews: [
         "CEO said revenue rose due to demand for AI products.",
@@ -75,7 +75,10 @@ describe("renderGapperNewsSummary", () => {
     expect(rendered).toContain(
       "Rev $124.7M / YoY 15.89% / Beat 17.09%",
     );
-    expect(rendered).toContain("Full year guidance: EPS NA / Rev 25%");
+    expect(rendered).toContain(
+      "Guidance Next Quarter: EPS YoY 30% - 100% / Rev YoY 6% - 10%",
+    );
+    expect(rendered).toContain("Full year guidance: EPS YoY NA / Rev YoY 25% YoY");
     expect(rendered).toContain(
       "- Contract: Announced a new AI infrastructure contract.",
     );
@@ -214,6 +217,9 @@ describe("createOpenAiNewsSummaryProvider", () => {
     expect(body.text.format.type).toBe("json_schema");
     expect(body.text.format.strict).toBe(true);
     expect(JSON.stringify(body)).toContain("Do not infer missing numbers");
+    expect(JSON.stringify(body)).toContain(
+      "Guidance fields must be YoY percentage strings only",
+    );
     expect(JSON.stringify(body)).toContain("Acme earnings");
   });
 });

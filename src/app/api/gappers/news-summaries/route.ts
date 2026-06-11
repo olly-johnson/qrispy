@@ -1,4 +1,4 @@
-import { requireUser } from "@/lib/auth/session";
+import { getCurrentUser } from "@/lib/auth/session";
 import { getNewsSummaryLlmConfig } from "@/lib/env";
 import {
   batchSummarizeGapperNews,
@@ -16,7 +16,13 @@ type SummaryRequestBody = {
 };
 
 export async function POST(request: Request) {
-  await requireUser();
+  const user = await getCurrentUser();
+  if (!user) {
+    return Response.json(
+      { error: "Sign in to analyse gappers." },
+      { status: 401 },
+    );
+  }
 
   const body = (await request.json()) as SummaryRequestBody;
   const tickers = Array.isArray(body.tickers) ? body.tickers : [];
@@ -49,26 +55,39 @@ export async function POST(request: Request) {
     );
   }
 
-  const requests = await Promise.all(
-    tickers.map(async (ticker) => {
-      const symbol = ticker.symbol.toUpperCase();
+  try {
+    const requests = await Promise.all(
+      tickers.map(async (ticker) => {
+        const symbol = ticker.symbol.toUpperCase();
 
-      return {
-        news: await massive.getTickerNews({
-          publishedAfter: ticker.previousCloseAt,
-          ticker: symbol,
-        }),
-        previousCloseAt: ticker.previousCloseAt,
-        symbol,
-      };
-    }),
-  );
+        return {
+          news: await massive.getTickerNews({
+            publishedAfter: ticker.previousCloseAt,
+            ticker: symbol,
+          }),
+          previousCloseAt: ticker.previousCloseAt,
+          symbol,
+        };
+      }),
+    );
 
-  const results = await batchSummarizeGapperNews({
-    model: selection.model,
-    provider: createOpenAiNewsSummaryProvider({ apiKey: configured.apiKey }),
-    requests,
-  });
+    const results = await batchSummarizeGapperNews({
+      model: selection.model,
+      provider: createOpenAiNewsSummaryProvider({ apiKey: configured.apiKey }),
+      requests,
+    });
 
-  return Response.json({ results });
+    return Response.json({ results });
+  } catch (error) {
+    console.error("[api/gappers/news-summaries] analysis failed", error);
+
+    return Response.json(
+      { error: `Unable to analyse gappers right now. ${errorMessage(error)}` },
+      { status: 502 },
+    );
+  }
+}
+
+function errorMessage(error: unknown) {
+  return error instanceof Error ? error.message : String(error);
 }
