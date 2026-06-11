@@ -1,5 +1,6 @@
 "use client";
 
+import type { ReactNode } from "react";
 import { ChevronDown, ChevronRight, RefreshCw } from "lucide-react";
 import { useRouter } from "next/navigation";
 import { useState, useTransition } from "react";
@@ -159,29 +160,94 @@ export function SectorBreadthView({
 }
 
 function BreadthCards({ snapshot }: { snapshot: SectorBreadthSnapshot }) {
+  const todayTone = countBalanceTone({
+    down: snapshot.liveBreadth.down4Percent,
+    up: snapshot.liveBreadth.up4Percent,
+  });
+  const longerMoveTone = countBalanceTone({
+    down: snapshot.liveBreadth.down13In34Days,
+    up: snapshot.liveBreadth.up13In34Days,
+  });
+
   return (
     <section className="mt-6 grid gap-4 sm:grid-cols-2 xl:grid-cols-5">
-      <Card label="T2108" value={formatNullablePercent(snapshot.liveBreadth.t2108)} />
+      <Card
+        label="T2108"
+        tone={thresholdTone(snapshot.liveBreadth.t2108, 50)}
+        value={formatNullablePercent(snapshot.liveBreadth.t2108)}
+      />
       <Card
         label="4% Today"
-        value={`${snapshot.liveBreadth.up4Percent} up / ${snapshot.liveBreadth.down4Percent} down`}
+        tone={todayTone}
+        value={
+          <CountPair
+            down={snapshot.liveBreadth.down4Percent}
+            tone={todayTone}
+            up={snapshot.liveBreadth.up4Percent}
+          />
+        }
       />
       <Card
         label="13% in 34 Days"
-        value={`${snapshot.liveBreadth.up13In34Days} up / ${snapshot.liveBreadth.down13In34Days} down`}
+        tone={longerMoveTone}
+        value={
+          <CountPair
+            down={snapshot.liveBreadth.down13In34Days}
+            tone={longerMoveTone}
+            up={snapshot.liveBreadth.up13In34Days}
+          />
+        }
       />
-      <Card label="5d Ratio" value={formatNullableNumber(snapshot.liveBreadth.ratio5Day)} />
-      <Card label="10d Ratio" value={formatNullableNumber(snapshot.liveBreadth.ratio10Day)} />
+      <Card
+        label="5d Ratio"
+        tone={thresholdTone(snapshot.liveBreadth.ratio5Day, 1)}
+        value={formatNullableNumber(snapshot.liveBreadth.ratio5Day)}
+      />
+      <Card
+        label="10d Ratio"
+        tone={thresholdTone(snapshot.liveBreadth.ratio10Day, 1)}
+        value={formatNullableNumber(snapshot.liveBreadth.ratio10Day)}
+      />
     </section>
   );
 }
 
-function Card({ label, value }: { label: string; value: string }) {
+function Card({
+  label,
+  tone,
+  value,
+}: {
+  label: string;
+  tone?: "down" | "up";
+  value: ReactNode;
+}) {
   return (
-    <article className="rounded-md border border-white/10 bg-white/[0.04] p-4">
+    <article className={`rounded-md border p-4 ${cardToneClass(tone)}`}>
       <div className="text-xs uppercase tracking-[0.14em] text-zinc-500">{label}</div>
-      <div className="mt-3 font-mono text-xl font-semibold text-white">{value}</div>
+      <div className={`mt-3 font-mono text-xl font-semibold ${valueToneClass(tone)}`}>
+        {value}
+      </div>
     </article>
+  );
+}
+
+function CountPair({
+  down,
+  tone,
+  up,
+}: {
+  down: number;
+  tone?: "down" | "up";
+  up: number;
+}) {
+  return (
+    <>
+      <span className={tone === "up" ? "text-emerald-200" : undefined}>{up} up</span>
+      <span className="text-zinc-400"> / </span>
+      <span className={tone === "down" ? "text-rose-200" : undefined}>
+        {down} down
+      </span>
+    </>
   );
 }
 
@@ -274,6 +340,53 @@ export function breadthCountTone({
   }
 
   return undefined;
+}
+
+export function countBalanceTone({
+  down,
+  up,
+}: {
+  down: number;
+  up: number;
+}) {
+  if (up > down) {
+    return "up";
+  }
+  if (down > up) {
+    return "down";
+  }
+
+  return undefined;
+}
+
+export function thresholdTone(value: number | null, threshold: number) {
+  if (value == null || value === threshold) {
+    return undefined;
+  }
+
+  return value > threshold ? "up" : "down";
+}
+
+function cardToneClass(tone: "down" | "up" | undefined) {
+  if (tone === "up") {
+    return "border-emerald-300/30 bg-emerald-300/[0.08]";
+  }
+  if (tone === "down") {
+    return "border-rose-300/30 bg-rose-300/[0.08]";
+  }
+
+  return "border-white/10 bg-white/[0.04]";
+}
+
+function valueToneClass(tone: "down" | "up" | undefined) {
+  if (tone === "up") {
+    return "text-emerald-200";
+  }
+  if (tone === "down") {
+    return "text-rose-200";
+  }
+
+  return "text-white";
 }
 
 function toggleSetValue(current: Set<string>, value: string) {
