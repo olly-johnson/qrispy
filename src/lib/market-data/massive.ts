@@ -50,9 +50,14 @@ const TIMEFRAME_PATH: Record<MarketDataTimeframe, { multiplier: number; timespan
   "1h": { multiplier: 1, timespan: "hour" },
 };
 const ACTIVE_TICKERS_CACHE_TTL_MS = 6 * 60 * 60 * 1000;
+const FULL_MARKET_SNAPSHOT_CACHE_TTL_MS = 60 * 1000;
 const activeTickerCache = new Map<
   string,
   { expiresAt: number; rows: MassiveReferenceTicker[] }
+>();
+const fullMarketSnapshotCache = new Map<
+  string,
+  { expiresAt: number; rows: MassiveSnapshotTicker[] }
 >();
 
 export class MassiveMarketDataProvider implements MarketDataProvider {
@@ -110,6 +115,12 @@ export class MassiveMarketDataProvider implements MarketDataProvider {
     const url = new URL(`${this.baseUrl}/v2/snapshot/locale/us/markets/stocks/tickers`);
     url.searchParams.set("include_otc", "false");
     url.searchParams.set("apiKey", this.apiKey);
+    const cacheKey = `${this.baseUrl}:${this.apiKey}:full-market-snapshot`;
+    const cached = fullMarketSnapshotCache.get(cacheKey);
+
+    if (cached && cached.expiresAt > Date.now()) {
+      return cached.rows;
+    }
 
     const response = await this.fetcher(url.toString(), { cache: "no-store" });
 
@@ -119,9 +130,15 @@ export class MassiveMarketDataProvider implements MarketDataProvider {
 
     const payload = (await response.json()) as { tickers?: unknown[] };
 
-    return Array.isArray(payload.tickers)
+    const rows = Array.isArray(payload.tickers)
       ? (payload.tickers as MassiveSnapshotTicker[])
       : [];
+    fullMarketSnapshotCache.set(cacheKey, {
+      expiresAt: Date.now() + FULL_MARKET_SNAPSHOT_CACHE_TTL_MS,
+      rows,
+    });
+
+    return rows;
   }
 
   async getTickerDetails(ticker: string): Promise<MassiveTickerDetails> {

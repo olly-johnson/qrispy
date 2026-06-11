@@ -162,7 +162,32 @@ describe("loadStockbeeBreadthHistory", () => {
     ]);
   });
 
-  it("syncs rows from every discovered workbook year sheet by default", async () => {
+  it("syncs the current published CSV by default instead of every workbook sheet", async () => {
+    const client = fakeStockbeeClient([
+      storedRow({ date: "2026-06-10" }),
+    ]);
+    const fetcher = vi.fn(async (url: string) => {
+      expect(url).toBe(
+        "https://docs.google.com/spreadsheet/pub?key=0Am_cU8NLIU20dEhiQnVHN3Nnc3B1S3J6eGhKZFo0N3c&output=csv",
+      );
+
+      return response(csvForDates(["6/10/2026"]));
+    });
+
+    const result = await loadStockbeeBreadthHistory({
+      client,
+      fetcher,
+      requestedYear: undefined,
+    });
+
+    expect(result.syncError).toBeNull();
+    expect(result.liveRows.map((item) => item.date)).toEqual(["2026-06-10"]);
+    expect(result.selectedRows).toEqual([row({ date: "2026-06-10" })]);
+    expect(client.upsertedRows.map((item) => item.date)).toEqual(["2026-06-10"]);
+    expect(fetcher).toHaveBeenCalledTimes(1);
+  });
+
+  it("can sync rows from every discovered workbook year sheet for explicit backfills", async () => {
     const client = fakeStockbeeClient([
       storedRow({ date: "2026-06-10" }),
       storedRow({ date: "2008-12-31" }),
@@ -190,6 +215,7 @@ describe("loadStockbeeBreadthHistory", () => {
       client,
       fetcher,
       requestedYear: "2008",
+      syncSource: "workbook",
     });
 
     expect(result.syncError).toBeNull();

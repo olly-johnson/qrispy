@@ -51,6 +51,7 @@ export async function loadStockbeeBreadthHistory(input: {
   fetcher?: StockbeeFetcher;
   requestedYear?: string;
   sourceUrl?: string;
+  syncSource?: "current" | "workbook";
 }): Promise<StockbeeBreadthHistory> {
   const fetcher = input.fetcher ?? fetch;
   const sourceUrl = input.sourceUrl ?? STOCKBEE_MARKET_MONITOR_URL;
@@ -58,7 +59,7 @@ export async function loadStockbeeBreadthHistory(input: {
   let syncError: string | null = null;
 
   try {
-    if (input.sourceUrl) {
+    if ((input.syncSource ?? "current") === "current") {
       const response = await fetcher(sourceUrl, { cache: "no-store" });
 
       if (!response.ok) {
