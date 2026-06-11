@@ -1,7 +1,7 @@
 import { AppShell } from "@/components/app-shell";
 import { SectorBreadthView } from "@/components/sector-breadth-view";
 import { requireUser } from "@/lib/auth/session";
-import { getCachedOrFetchBars } from "@/lib/market-data/cache";
+import { readCachedBreadthMetrics } from "@/lib/market-data/cached-breadth-metrics";
 import { createMassiveMarketDataProvider } from "@/lib/market-data/massive";
 import {
   buildCommonStockUniverse,
@@ -10,15 +10,11 @@ import {
 } from "@/lib/market-data/market-universe";
 import {
   buildSectorBreadthSnapshot,
-  calculateHistoricalBreadthMetrics,
 } from "@/lib/market-data/sector-breadth";
 import { readStockClassifications } from "@/lib/market-data/sector-classifications";
-import type { OhlcvBar } from "@/lib/market-data/types";
 import { createSupabaseAdminClient } from "@/lib/supabase/server";
 
 export const dynamic = "force-dynamic";
-
-const HISTORY_LOOKBACK_DAYS = 75;
 
 export default async function SectorBreadthPage() {
   const user = await requireUser();
@@ -94,14 +90,10 @@ async function loadSectorBreadth() {
       },
       { down4: 0, up4: 0 },
     );
-    const barsBySymbol = await loadHistoricalBars({
+    const historicalMetrics = await readCachedBreadthMetrics({
+      asOfDate: datePart(loadedAt),
       client,
-      loadedAt,
-      provider,
       symbols: mappedSymbols,
-    });
-    const historicalMetrics = calculateHistoricalBreadthMetrics({
-      barsBySymbol,
       todayDown4Percent: todayCounts.down4,
       todayUp4Percent: todayCounts.up4,
     });
@@ -122,44 +114,6 @@ async function loadSectorBreadth() {
       snapshot: null,
     };
   }
-}
-
-async function loadHistoricalBars(input: {
-  client: unknown;
-  loadedAt: Date;
-  provider: NonNullable<ReturnType<typeof createMassiveMarketDataProvider>>;
-  symbols: string[];
-}) {
-  const to = datePart(input.loadedAt);
-  const from = datePart(addDays(input.loadedAt, -HISTORY_LOOKBACK_DAYS));
-  const barsBySymbol = new Map<string, OhlcvBar[]>();
-
-  for (const symbol of input.symbols) {
-    try {
-      const bars = await getCachedOrFetchBars({
-        client: input.client,
-        provider: input.provider,
-        request: {
-          adjusted: true,
-          from,
-          symbol,
-          timeframe: "1d",
-          to,
-        },
-      });
-      barsBySymbol.set(symbol, bars);
-    } catch {
-      barsBySymbol.set(symbol, []);
-    }
-  }
-
-  return barsBySymbol;
-}
-
-function addDays(value: Date, days: number) {
-  const date = new Date(value);
-  date.setUTCDate(date.getUTCDate() + days);
-  return date;
 }
 
 function datePart(value: Date) {

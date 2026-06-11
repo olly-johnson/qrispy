@@ -189,3 +189,49 @@ describe("Stock classifications migration", () => {
     expect(sql).toContain("using (true)");
   });
 });
+
+describe("Cached sector breadth metrics migration", () => {
+  it("adds an RPC for calculating cached historical breadth metrics in Postgres", () => {
+    const migrationName = readdirSync(
+      join(process.cwd(), "supabase", "migrations"),
+    ).find((name) => name.endsWith("_add_cached_breadth_metrics_rpc.sql"));
+    expect(migrationName).toBeDefined();
+
+    const sql = readFileSync(
+      join(process.cwd(), "supabase", "migrations", migrationName!),
+      "utf8",
+    );
+
+    expect(sql).toContain(
+      "create or replace function public.calculate_cached_breadth_metrics",
+    );
+    expect(sql).toContain("today_up4 integer");
+    expect(sql).toContain("today_down4 integer");
+    expect(sql).toContain("ohlcv_bars");
+    expect(sql).toContain(
+      "grant execute on function public.calculate_cached_breadth_metrics",
+    );
+  });
+});
+
+describe("Cached breadth metrics index migration", () => {
+  it("adds a covering OHLCV index for the sector breadth RPC", () => {
+    const migrationName = readdirSync(
+      join(process.cwd(), "supabase", "migrations"),
+    ).find((name) => name.endsWith("_add_cached_breadth_metrics_index.sql"));
+    expect(migrationName).toBeDefined();
+
+    const sql = readFileSync(
+      join(process.cwd(), "supabase", "migrations", migrationName!),
+      "utf8",
+    );
+
+    expect(sql).toContain(
+      "create index if not exists ohlcv_bars_breadth_metrics_idx",
+    );
+    expect(sql.replace(/\s+/g, " ")).toContain(
+      "provider, timeframe, adjusted, symbol, bar_start_at",
+    );
+    expect(sql).toContain("include (close)");
+  });
+});
