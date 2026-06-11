@@ -187,7 +187,7 @@ export async function syncStockClassifications(input: {
   );
 
   if (result.error) {
-    throw result.error;
+    throw new Error(errorMessage(result.error));
   }
 }
 
@@ -199,7 +199,7 @@ export async function readStockClassifications(input: { client: unknown }) {
     .order("ticker", { ascending: true });
 
   if (error) {
-    throw error;
+    throw new Error(errorMessage(error));
   }
 
   return (data ?? []).map(classificationFromStoredRow);
@@ -221,4 +221,29 @@ function normalizeIndustry(value: string | null) {
   const normalized = value?.trim().replace(/\s+/g, " ");
 
   return normalized || null;
+}
+
+function errorMessage(error: unknown) {
+  if (error instanceof Error) {
+    return error.message;
+  }
+
+  if (error && typeof error === "object") {
+    const record = error as Record<string, unknown>;
+    const message = stringValue(record.message);
+    const code = stringValue(record.code);
+
+    if (message && code) {
+      return `${code}: ${message}`;
+    }
+    if (message) {
+      return message;
+    }
+  }
+
+  return String(error);
+}
+
+function stringValue(value: unknown) {
+  return typeof value === "string" && value.trim() ? value : null;
 }

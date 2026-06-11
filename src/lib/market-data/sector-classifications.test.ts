@@ -132,9 +132,25 @@ describe("stock classification store", () => {
       },
     ]);
   });
+
+  it("throws readable Supabase errors instead of raw objects", async () => {
+    const client = fakeClassificationClient([], {
+      readError: {
+        code: "PGRST205",
+        message: "Could not find the table 'public.stock_classifications'",
+      },
+    });
+
+    await expect(readStockClassifications({ client })).rejects.toThrow(
+      "PGRST205: Could not find the table 'public.stock_classifications'",
+    );
+  });
 });
 
-function fakeClassificationClient(storedRows: Record<string, unknown>[]) {
+function fakeClassificationClient(
+  storedRows: Record<string, unknown>[],
+  options: { readError?: unknown } = {},
+) {
   const client = {
     upsertOptions: null as unknown,
     upsertedRows: [] as Record<string, unknown>[],
@@ -143,7 +159,12 @@ function fakeClassificationClient(storedRows: Record<string, unknown>[]) {
 
       return {
         select: vi.fn(() => ({
-          order: vi.fn(() => Promise.resolve({ data: storedRows, error: null })),
+          order: vi.fn(() =>
+            Promise.resolve({
+              data: options.readError ? null : storedRows,
+              error: options.readError ?? null,
+            }),
+          ),
         })),
         upsert: vi.fn((rows, options) => {
           client.upsertedRows.push(...rows);
