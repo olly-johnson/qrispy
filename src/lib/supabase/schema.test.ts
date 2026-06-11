@@ -155,3 +155,37 @@ describe("Stockbee breadth rows migration", () => {
     expect(sql).toContain("using (true)");
   });
 });
+
+describe("Stock classifications migration", () => {
+  it("adds SIC-derived sector classification cache with authenticated read access", () => {
+    const migrationName = readdirSync(
+      join(process.cwd(), "supabase", "migrations"),
+    ).find((name) => name.endsWith("_add_stock_classifications.sql"));
+    expect(migrationName).toBeDefined();
+
+    const sql = readFileSync(
+      join(process.cwd(), "supabase", "migrations", migrationName!),
+      "utf8",
+    );
+
+    expect(sql).toContain("create table public.stock_classifications");
+    expect(sql).toContain("ticker text primary key");
+    expect(sql).toContain("name text not null");
+    expect(sql).toContain("sector text not null");
+    expect(sql).toContain("industry text not null");
+    expect(sql).toContain("source text not null");
+    expect(sql).toContain("source_updated_at timestamptz not null");
+    expect(sql).toContain("stock_classifications_sector_industry_idx");
+    expect(sql).toContain(
+      "alter table public.stock_classifications enable row level security",
+    );
+    expect(sql).toContain(
+      "grant select on table public.stock_classifications to authenticated",
+    );
+    expect(sql).toContain(
+      "grant select, insert, update, delete on table public.stock_classifications to service_role",
+    );
+    expect(sql).toContain("authenticated can select stock classifications");
+    expect(sql).toContain("using (true)");
+  });
+});
