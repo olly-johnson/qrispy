@@ -76,8 +76,22 @@ export function SectorBreadthView({
                       {sector.name}
                     </span>
                     <Metric value={formatPercentValue(sector.averageTodayPercent)} />
-                    <Metric value={`${sector.up} up`} tone="up" />
-                    <Metric value={`${sector.down} down`} tone="down" />
+                    <Metric
+                      value={`${sector.up} up`}
+                      tone={breadthCountTone({
+                        down: sector.down,
+                        side: "up",
+                        up: sector.up,
+                      })}
+                    />
+                    <Metric
+                      value={`${sector.down} down`}
+                      tone={breadthCountTone({
+                        down: sector.down,
+                        side: "down",
+                        up: sector.up,
+                      })}
+                    />
                     <Metric value={`${sector.industries.length} industries`} />
                   </button>
                   {sectorOpen ? (
@@ -106,8 +120,22 @@ export function SectorBreadthView({
                                 {industry.name}
                               </span>
                               <Metric value={formatPercentValue(industry.averageTodayPercent)} />
-                              <Metric value={`${industry.up} up`} tone="up" />
-                              <Metric value={`${industry.down} down`} tone="down" />
+                              <Metric
+                                value={`${industry.up} up`}
+                                tone={breadthCountTone({
+                                  down: industry.down,
+                                  side: "up",
+                                  up: industry.up,
+                                })}
+                              />
+                              <Metric
+                                value={`${industry.down} down`}
+                                tone={breadthCountTone({
+                                  down: industry.down,
+                                  side: "down",
+                                  up: industry.up,
+                                })}
+                              />
                               <Metric value={`${industry.stocks.length} stocks`} />
                             </button>
                             {industryOpen ? <StocksTable stocks={industry.stocks} /> : null}
@@ -227,6 +255,25 @@ function Metric({
       {value}
     </span>
   );
+}
+
+export function breadthCountTone({
+  down,
+  side,
+  up,
+}: {
+  down: number;
+  side: "down" | "up";
+  up: number;
+}) {
+  if (up > down && side === "up") {
+    return "up";
+  }
+  if (down > up && side === "down") {
+    return "down";
+  }
+
+  return undefined;
 }
 
 function toggleSetValue(current: Set<string>, value: string) {
