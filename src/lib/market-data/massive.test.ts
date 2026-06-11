@@ -179,6 +179,35 @@ describe("MassiveMarketDataProvider", () => {
     expect(fetcher.mock.calls[0][1]).toEqual({ cache: "no-store" });
   });
 
+  it("caches the full US stock market snapshot for repeated page navigations", async () => {
+    const fetcher = vi.fn().mockResolvedValue({
+      ok: true,
+      status: 200,
+      json: async () => ({
+        tickers: [
+          {
+            ticker: "FAST",
+            todaysChangePerc: 4.2,
+          },
+        ],
+      }),
+    });
+    const provider = new MassiveMarketDataProvider({
+      apiKey: "snapshot-cache-key",
+      baseUrl: "https://snapshot-cache.massive.test",
+      fetcher,
+    });
+
+    await expect(provider.getFullMarketSnapshot()).resolves.toEqual([
+      expect.objectContaining({ ticker: "FAST" }),
+    ]);
+    await expect(provider.getFullMarketSnapshot()).resolves.toEqual([
+      expect.objectContaining({ ticker: "FAST" }),
+    ]);
+
+    expect(fetcher).toHaveBeenCalledTimes(1);
+  });
+
   it("fetches ticker details with SIC classification fields", async () => {
     const fetcher = vi.fn().mockResolvedValue({
       ok: true,
