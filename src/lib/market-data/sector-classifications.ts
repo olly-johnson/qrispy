@@ -27,7 +27,12 @@ type ClassificationClient = {
       order(
         column: "ticker",
         options: { ascending: boolean },
-      ): Promise<{ data: Record<string, unknown>[] | null; error: unknown }>;
+      ): {
+        range(
+          from: number,
+          to: number,
+        ): Promise<{ data: Record<string, unknown>[] | null; error: unknown }>;
+      };
     };
     upsert(
       rows: Record<string, unknown>[],
@@ -35,6 +40,8 @@ type ClassificationClient = {
     ): Promise<{ error: unknown }>;
   };
 };
+
+const STOCK_CLASSIFICATION_PAGE_SIZE = 1000;
 
 export function classificationFromTickerDetails(
   details: MassiveTickerDetails,
@@ -193,16 +200,29 @@ export async function syncStockClassifications(input: {
 
 export async function readStockClassifications(input: { client: unknown }) {
   const client = input.client as ClassificationClient;
-  const { data, error } = await client
-    .from("stock_classifications")
-    .select("*")
-    .order("ticker", { ascending: true });
+  const rows: Record<string, unknown>[] = [];
 
-  if (error) {
-    throw new Error(errorMessage(error));
+  for (let from = 0; ; from += STOCK_CLASSIFICATION_PAGE_SIZE) {
+    const to = from + STOCK_CLASSIFICATION_PAGE_SIZE - 1;
+    const { data, error } = await client
+      .from("stock_classifications")
+      .select("*")
+      .order("ticker", { ascending: true })
+      .range(from, to);
+
+    if (error) {
+      throw new Error(errorMessage(error));
+    }
+
+    const page = data ?? [];
+    rows.push(...page);
+
+    if (page.length < STOCK_CLASSIFICATION_PAGE_SIZE) {
+      break;
+    }
   }
 
-  return (data ?? []).map(classificationFromStoredRow);
+  return rows.map(classificationFromStoredRow);
 }
 
 function classificationFromStoredRow(

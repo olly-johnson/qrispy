@@ -145,6 +145,23 @@ describe("stock classification store", () => {
       "PGRST205: Could not find the table 'public.stock_classifications'",
     );
   });
+
+  it("reads past Supabase's default 1000 row page", async () => {
+    const rows = Array.from({ length: 1005 }, (_, index) => ({
+      industry: "Semiconductors",
+      name: `Company ${index}`,
+      sector: "Information Technology",
+      source: "sic-derived",
+      ticker: `T${String(index).padStart(4, "0")}`,
+    }));
+    const client = fakeClassificationClient(rows);
+
+    await expect(readStockClassifications({ client })).resolves.toHaveLength(1005);
+    expect(client.ranges).toEqual([
+      [0, 999],
+      [1000, 1999],
+    ]);
+  });
 });
 
 function fakeClassificationClient(
@@ -152,6 +169,7 @@ function fakeClassificationClient(
   options: { readError?: unknown } = {},
 ) {
   const client = {
+    ranges: [] as Array<[number, number]>,
     upsertOptions: null as unknown,
     upsertedRows: [] as Record<string, unknown>[],
     from(table: string) {
@@ -159,12 +177,26 @@ function fakeClassificationClient(
 
       return {
         select: vi.fn(() => ({
-          order: vi.fn(() =>
-            Promise.resolve({
-              data: options.readError ? null : storedRows,
-              error: options.readError ?? null,
-            }),
-          ),
+          order: vi.fn(() => {
+            const defaultPage = storedRows.slice(0, 1000);
+            const query = {
+              range: vi.fn((from: number, to: number) => {
+                client.ranges.push([from, to]);
+                return Promise.resolve({
+                  data: options.readError ? null : storedRows.slice(from, to + 1),
+                  error: options.readError ?? null,
+                });
+              }),
+              then(resolve: (value: unknown) => unknown) {
+                return Promise.resolve({
+                  data: options.readError ? null : defaultPage,
+                  error: options.readError ?? null,
+                }).then(resolve);
+              },
+            };
+
+            return query;
+          }),
         })),
         upsert: vi.fn((rows, options) => {
           client.upsertedRows.push(...rows);

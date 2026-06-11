@@ -41,6 +41,26 @@ describe("normalizeMarketSnapshotTicker", () => {
     });
   });
 
+  it("uses Massive's today change when live price fields are zero placeholders", () => {
+    const normalized = normalizeMarketSnapshotTicker({
+      day: { c: 0, v: 0 },
+      min: { c: 0 },
+      prevDay: { c: 100, v: 50_000 },
+      ticker: "ACME",
+      todaysChangePerc: 1.5,
+      updated: 0,
+    });
+
+    expect(normalized).toEqual({
+      lastUpdatedAt: null,
+      price: expect.any(Number),
+      previousClose: 100,
+      symbol: "ACME",
+      volume: 0,
+    });
+    expect(normalized?.price).toBeCloseTo(101.5);
+  });
+
   it("returns null when price or previous close is missing", () => {
     expect(normalizeMarketSnapshotTicker({ ticker: "ACME" })).toBeNull();
   });

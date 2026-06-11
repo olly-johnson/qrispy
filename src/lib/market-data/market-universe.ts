@@ -42,19 +42,26 @@ export function normalizeMarketSnapshotTicker(
   snapshot: MassiveSnapshotTicker,
 ): NormalizedMarketSnapshot | null {
   const symbol = String(snapshot.ticker ?? "").toUpperCase();
-  const price = firstFiniteNumber([
+  const previousClose = firstFiniteNumber([
+    getPath(snapshot, ["prevDay", "c"]),
+    getPath(snapshot, ["session", "previous_close"]),
+  ]);
+
+  if (!symbol || previousClose == null || previousClose <= 0) {
+    return null;
+  }
+
+  const livePrice = firstPositiveFiniteNumber([
     getPath(snapshot, ["fmv"]),
     getPath(snapshot, ["lastTrade", "p"]),
     getPath(snapshot, ["last_trade", "price"]),
     getPath(snapshot, ["min", "c"]),
     getPath(snapshot, ["day", "c"]),
   ]);
-  const previousClose = firstFiniteNumber([
-    getPath(snapshot, ["prevDay", "c"]),
-    getPath(snapshot, ["session", "previous_close"]),
-  ]);
+  const price =
+    priceFromChange(snapshot, previousClose, livePrice == null) ?? livePrice;
 
-  if (!symbol || price == null || previousClose == null || previousClose <= 0) {
+  if (price == null) {
     return null;
   }
 
@@ -63,7 +70,10 @@ export function normalizeMarketSnapshotTicker(
       getPath(snapshot, ["day", "v"]),
       getPath(snapshot, ["session", "volume"]),
     ]) ?? 0;
-  const updated = firstFiniteNumber([snapshot.updated, snapshot.last_updated]);
+  const updated = firstPositiveFiniteNumber([
+    snapshot.updated,
+    snapshot.last_updated,
+  ]);
 
   return {
     lastUpdatedAt: updated == null ? null : timestampToIso(updated),
@@ -97,6 +107,36 @@ function firstFiniteNumber(values: unknown[]) {
   }
 
   return null;
+}
+
+function firstPositiveFiniteNumber(values: unknown[]) {
+  for (const value of values) {
+    const parsed = numberFrom(value);
+
+    if (parsed != null && parsed > 0) {
+      return parsed;
+    }
+  }
+
+  return null;
+}
+
+function priceFromChange(
+  snapshot: MassiveSnapshotTicker,
+  previousClose: number,
+  useZeroChange: boolean,
+) {
+  const changePercent = numberFrom(snapshot.todaysChangePerc);
+
+  if (changePercent != null && (changePercent !== 0 || useZeroChange)) {
+    return previousClose * (1 + changePercent / 100);
+  }
+
+  const change = numberFrom(snapshot.todaysChange);
+
+  return change != null && (change !== 0 || useZeroChange)
+    ? previousClose + change
+    : null;
 }
 
 function numberFrom(value: unknown) {
