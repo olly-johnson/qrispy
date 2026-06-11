@@ -5,15 +5,15 @@ import { POST } from "./route";
 const mocks = vi.hoisted(() => ({
   batchSummarizeGapperNews: vi.fn(),
   createOpenAiNewsSummaryProvider: vi.fn(),
+  getCurrentUser: vi.fn(),
   getTickerNews: vi.fn(),
+  requireUser: vi.fn(),
   resolveNewsSummaryModel: vi.fn(),
 }));
 
 vi.mock("@/lib/auth/session", () => ({
-  requireUser: vi.fn(async () => ({
-    email: "owner@example.com",
-    id: "user-1",
-  })),
+  getCurrentUser: mocks.getCurrentUser,
+  requireUser: mocks.requireUser,
 }));
 
 vi.mock("@/lib/env", () => ({
@@ -44,10 +44,20 @@ describe("POST /api/gappers/news-summaries", () => {
   beforeEach(() => {
     mocks.batchSummarizeGapperNews.mockReset();
     mocks.createOpenAiNewsSummaryProvider.mockReset();
+    mocks.getCurrentUser.mockReset();
     mocks.getTickerNews.mockReset();
+    mocks.requireUser.mockReset();
     mocks.resolveNewsSummaryModel.mockReset();
     mocks.createOpenAiNewsSummaryProvider.mockReturnValue({
       extract: vi.fn(),
+    });
+    mocks.getCurrentUser.mockResolvedValue({
+      email: "owner@example.com",
+      id: "user-1",
+    });
+    mocks.requireUser.mockResolvedValue({
+      email: "owner@example.com",
+      id: "user-1",
     });
     mocks.resolveNewsSummaryModel.mockReturnValue({
       model: "gpt-4o-mini",
@@ -70,6 +80,34 @@ describe("POST /api/gappers/news-summaries", () => {
     expect(response.status).toBe(400);
     await expect(response.json()).resolves.toEqual({
       error: "Select at least one ticker.",
+    });
+    expect(mocks.getTickerNews).not.toHaveBeenCalled();
+  });
+
+  it("returns JSON when the user is not authenticated", async () => {
+    mocks.getCurrentUser.mockResolvedValue(null);
+    mocks.requireUser.mockRejectedValue(new Error("NEXT_REDIRECT"));
+
+    const response = await POST(
+      new Request("http://localhost/api/gappers/news-summaries", {
+        body: JSON.stringify({
+          model: "gpt-4o-mini",
+          provider: "openai",
+          tickers: [
+            {
+              previousCloseAt: "2026-06-03T20:00:00.000Z",
+              symbol: "acme",
+            },
+          ],
+        }),
+        method: "POST",
+      }),
+    );
+
+    expect(response.status).toBe(401);
+    expect(response.headers.get("content-type")).toContain("application/json");
+    await expect(response.json()).resolves.toEqual({
+      error: "Sign in to analyse gappers.",
     });
     expect(mocks.getTickerNews).not.toHaveBeenCalled();
   });
@@ -138,5 +176,32 @@ describe("POST /api/gappers/news-summaries", () => {
         ],
       }),
     );
+  });
+
+  it("returns JSON when fetching ticker news fails", async () => {
+    mocks.getTickerNews.mockRejectedValue(new TypeError("fetch failed"));
+
+    const response = await POST(
+      new Request("http://localhost/api/gappers/news-summaries", {
+        body: JSON.stringify({
+          model: "gpt-4o-mini",
+          provider: "openai",
+          tickers: [
+            {
+              previousCloseAt: "2026-06-03T20:00:00.000Z",
+              symbol: "acme",
+            },
+          ],
+        }),
+        method: "POST",
+      }),
+    );
+
+    expect(response.status).toBe(502);
+    expect(response.headers.get("content-type")).toContain("application/json");
+    await expect(response.json()).resolves.toEqual({
+      error: "Unable to analyse gappers right now. fetch failed",
+    });
+    expect(mocks.batchSummarizeGapperNews).not.toHaveBeenCalled();
   });
 });
