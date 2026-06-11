@@ -179,6 +179,39 @@ describe("MassiveMarketDataProvider", () => {
     expect(fetcher.mock.calls[0][1]).toEqual({ cache: "no-store" });
   });
 
+  it("fetches ticker details with SIC classification fields", async () => {
+    const fetcher = vi.fn().mockResolvedValue({
+      ok: true,
+      status: 200,
+      json: async () => ({
+        results: {
+          active: true,
+          name: "Acme Semiconductors",
+          sic_code: "3674",
+          sic_description: "Semiconductors and Related Devices",
+          ticker: "ACME",
+        },
+      }),
+    });
+    const provider = new MassiveMarketDataProvider({
+      apiKey: "massive-key",
+      fetcher,
+    });
+
+    await expect(provider.getTickerDetails("acme")).resolves.toEqual({
+      active: true,
+      name: "Acme Semiconductors",
+      sicCode: "3674",
+      sicDescription: "Semiconductors and Related Devices",
+      ticker: "ACME",
+    });
+
+    const url = new URL(fetcher.mock.calls[0][0]);
+    expect(url.pathname).toBe("/v3/reference/tickers/ACME");
+    expect(url.searchParams.get("apiKey")).toBe("massive-key");
+    expect(fetcher.mock.calls[0][1]).toEqual({ cache: "no-store" });
+  });
+
   it("fetches ticker news published after the previous close", async () => {
     const fetcher = vi.fn().mockResolvedValue({
       ok: true,
