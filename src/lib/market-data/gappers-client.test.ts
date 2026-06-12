@@ -6,8 +6,10 @@ import {
   getLastGappersSummaryResults,
   DEFAULT_GAPPERS_FILTERS,
   filterGappersRows,
+  parseGappersFiltersSearchParams,
   saveLastGappersSummaryResults,
   saveGappersSummaryResults,
+  serializeGappersFiltersSearchParams,
 } from "./gappers-client";
 import type { GappersRow } from "./gappers";
 
@@ -61,6 +63,40 @@ describe("buildGappersSummaryRequests", () => {
         symbol: "IETF",
       },
     ]);
+  });
+});
+
+describe("gappers search params", () => {
+  it("parses numeric and type criteria from search params", () => {
+    expect(
+      parseGappersFiltersSearchParams({
+        includeEtfs: "false",
+        includeStocks: "true",
+        minDollarVolume: "250000",
+        minGapPercent: "3.5",
+        minPrice: "0.1",
+      }),
+    ).toEqual({
+      includeEtfs: false,
+      includeStocks: true,
+      minDollarVolume: 250_000,
+      minGapPercent: 3.5,
+      minPrice: 0.1,
+    });
+  });
+
+  it("serializes criteria so URL changes can refresh server results", () => {
+    expect(
+      serializeGappersFiltersSearchParams({
+        includeEtfs: false,
+        includeStocks: true,
+        minDollarVolume: 250_000,
+        minGapPercent: 3.5,
+        minPrice: 0.1,
+      }).toString(),
+    ).toBe(
+      "minPrice=0.1&minGapPercent=3.5&minDollarVolume=250000&includeStocks=true&includeEtfs=false",
+    );
   });
 });
 
