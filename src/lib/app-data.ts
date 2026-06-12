@@ -1,5 +1,6 @@
 import { buildPortfolioSummary } from "@/lib/portfolio/metrics";
 import type { OpenTradeStopInput } from "@/lib/portfolio/metrics";
+import { buildTradeExpectancySnapshots } from "@/lib/portfolio/expectancy";
 import { createSupabaseServerClient } from "@/lib/supabase/server";
 import { createSupabaseAdminClient } from "@/lib/supabase/server";
 import { createMassiveMarketDataProvider } from "@/lib/market-data/massive";
@@ -177,7 +178,14 @@ export async function getDashboardData(userId: string) {
     return emptyDashboardData();
   }
 
-  const [snapshotResult, positionsResult, tradesResult, openTradesResult, jobsResult] =
+  const [
+    snapshotResult,
+    positionsResult,
+    tradesResult,
+    openTradesResult,
+    jobsResult,
+    expectancyTradesResult,
+  ] =
     await Promise.all([
       supabase
         .from("account_portfolio_snapshots")
@@ -211,10 +219,17 @@ export async function getDashboardData(userId: string) {
         .eq("user_id", userId)
         .order("created_at", { ascending: false })
         .limit(8),
+      supabase
+        .from("trades")
+        .select("*")
+        .eq("user_id", userId)
+        .eq("status", "CLOSED")
+        .order("closed_at", { ascending: false }),
     ]);
 
   const positions = mapLatestPositions(positionsResult.data ?? []);
   const trades = (tradesResult.data ?? []).map(mapTrade);
+  const expectancyTrades = (expectancyTradesResult.data ?? []).map(mapTrade);
   const openTradeRows = openTradesResult.data ?? [];
   const openTrades = openTradeRows.map(mapOpenTradeStop);
   const stopGroupRows =
@@ -267,6 +282,7 @@ export async function getDashboardData(userId: string) {
 
   return {
     summary,
+    expectancy: buildTradeExpectancySnapshots(expectancyTrades),
     positions: positionsWithStops,
     trades,
     jobs: (jobsResult.data ?? []).map(mapJob),
@@ -476,6 +492,7 @@ function emptyDashboardData() {
 
   return {
     summary,
+    expectancy: buildTradeExpectancySnapshots([]),
     positions: [] as DashboardPosition[],
     trades: [] as DashboardTrade[],
     jobs: [] as JobRun[],

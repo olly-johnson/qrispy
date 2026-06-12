@@ -2,11 +2,18 @@ import { describe, expect, it, vi } from "vitest";
 
 import {
   attachPositionStopGroups,
+  getDashboardData,
   getTradeDetail,
   getTradeHistory,
   loadStopGroupRows,
   mapLatestPositions,
 } from "@/lib/app-data";
+import { createSupabaseServerClient } from "@/lib/supabase/server";
+
+vi.mock("@/lib/supabase/server", () => ({
+  createSupabaseAdminClient: vi.fn(() => null),
+  createSupabaseServerClient: vi.fn(),
+}));
 
 describe("mapLatestPositions", () => {
   it("keeps only one row per account and symbol from the latest snapshot", () => {
@@ -329,6 +336,124 @@ describe("loadStopGroupRows", () => {
   });
 });
 
+describe("getDashboardData", () => {
+  it("loads closed trades for all-trade and last-30 expectancy snapshots", async () => {
+    const from = vi.fn((table: string) => {
+      if (table === "account_portfolio_snapshots") {
+        return {
+          select: vi.fn(() => ({
+            eq: vi.fn(() => ({
+              order: vi.fn(() => ({
+                limit: vi.fn(() => ({
+                  maybeSingle: vi.fn().mockResolvedValue({
+                    data: null,
+                    error: null,
+                  }),
+                })),
+              })),
+            })),
+          })),
+        };
+      }
+
+      if (table === "broker_position_snapshots") {
+        return {
+          select: vi.fn(() => ({
+            eq: vi.fn(() => ({
+              order: vi.fn(() => ({
+                limit: vi.fn().mockResolvedValue({ data: [], error: null }),
+              })),
+            })),
+          })),
+        };
+      }
+
+      if (table === "trades") {
+        const statusEq = vi.fn((column: string, value: string) => {
+          if (column === "status" && value === "OPEN") {
+            return {
+              order: vi.fn(() => ({
+                limit: vi.fn().mockResolvedValue({ data: [], error: null }),
+              })),
+            };
+          }
+
+          if (column === "status" && value === "CLOSED") {
+            return {
+              order: vi.fn().mockResolvedValue({
+                data: [
+                  dashboardTradeRow({
+                    id: "win",
+                    closed_at: "2026-03-02T16:00:00.000Z",
+                    realized_pnl: 120,
+                  }),
+                  dashboardTradeRow({
+                    id: "loss",
+                    closed_at: "2026-03-01T16:00:00.000Z",
+                    realized_pnl: -60,
+                  }),
+                ],
+                error: null,
+              }),
+            };
+          }
+
+          throw new Error(`Unexpected trades filter ${column}=${value}`);
+        });
+
+        return {
+          select: vi.fn(() => ({
+            eq: vi.fn((column: string, value: string) => {
+              if (column === "user_id" && value === "user-1") {
+                return {
+                  order: vi.fn(() => ({
+                    limit: vi.fn().mockResolvedValue({ data: [], error: null }),
+                  })),
+                  eq: statusEq,
+                };
+              }
+
+              return {
+                order: vi.fn(() => ({
+                  limit: vi.fn().mockResolvedValue({ data: [], error: null }),
+                })),
+                eq: statusEq,
+              };
+            }),
+          })),
+        };
+      }
+
+      if (table === "job_runs") {
+        return {
+          select: vi.fn(() => ({
+            eq: vi.fn(() => ({
+              order: vi.fn(() => ({
+                limit: vi.fn().mockResolvedValue({ data: [], error: null }),
+              })),
+            })),
+          })),
+        };
+      }
+
+      throw new Error(`Unexpected table ${table}`);
+    });
+    vi.mocked(createSupabaseServerClient).mockResolvedValue({ from } as never);
+
+    const data = await getDashboardData("user-1");
+
+    expect(data.expectancy.all).toMatchObject({
+      tradeCount: 2,
+      winCount: 1,
+      battingAverage: 0.5,
+      averageGain: 120,
+      averageLoss: 60,
+      gainLossRatio: 2,
+    });
+    expect(data.expectancy.last30.tradeCount).toBe(2);
+  });
+});
+
 describe("getTradeHistory", () => {
   it("loads all trades that overlap Jan 1 through today's date without the dashboard limit", async () => {
     const order = vi.fn().mockResolvedValue({
@@ -395,6 +520,27 @@ describe("getTradeHistory", () => {
     expect(JSON.stringify({ from: from.mock.calls })).not.toContain("limit");
   });
 });
+
+function dashboardTradeRow(input: {
+  id: string;
+  closed_at: string | null;
+  realized_pnl: number | null;
+}) {
+  return {
+    id: input.id,
+    symbol: "QRSP",
+    direction: "LONG",
+    status: "CLOSED",
+    opened_at: "2026-03-01T14:30:00.000Z",
+    closed_at: input.closed_at,
+    entry_quantity: 10,
+    max_abs_quantity: 10,
+    avg_entry_price: 10,
+    avg_exit_price: 11,
+    realized_pnl: input.realized_pnl,
+    total_fees: 1,
+  };
+}
 
 describe("getTradeDetail", () => {
   it("loads editable stop groups for open trades", async () => {
