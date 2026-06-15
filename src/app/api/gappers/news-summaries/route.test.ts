@@ -6,6 +6,7 @@ const mocks = vi.hoisted(() => ({
   batchSummarizeGapperNews: vi.fn(),
   createOpenAiNewsSummaryProvider: vi.fn(),
   getCurrentUser: vi.fn(),
+  getNewsSummaryLlmConfig: vi.fn(),
   getTickerNews: vi.fn(),
   requireUser: vi.fn(),
   resolveNewsSummaryModel: vi.fn(),
@@ -21,11 +22,7 @@ vi.mock("@/lib/env", () => ({
     apiKey: "massive-key",
     baseUrl: "https://api.massive.com",
   }),
-  getNewsSummaryLlmConfig: () => ({
-    apiKey: "openai-key",
-    model: "gpt-4o-mini",
-    provider: "openai",
-  }),
+  getNewsSummaryLlmConfig: mocks.getNewsSummaryLlmConfig,
 }));
 
 vi.mock("@/lib/market-data/massive", () => ({
@@ -50,6 +47,11 @@ describe("POST /api/gappers/news-summaries", () => {
     mocks.resolveNewsSummaryModel.mockReset();
     mocks.createOpenAiNewsSummaryProvider.mockReturnValue({
       extract: vi.fn(),
+    });
+    mocks.getNewsSummaryLlmConfig.mockReturnValue({
+      apiKey: "openai-key",
+      model: "gpt-4o-mini",
+      provider: "openai",
     });
     mocks.getCurrentUser.mockResolvedValue({
       email: "owner@example.com",
@@ -80,6 +82,32 @@ describe("POST /api/gappers/news-summaries", () => {
     expect(response.status).toBe(400);
     await expect(response.json()).resolves.toEqual({
       error: "Select at least one ticker.",
+    });
+    expect(mocks.getTickerNews).not.toHaveBeenCalled();
+  });
+
+  it("reports a missing OpenAI key when summaries are not configured", async () => {
+    mocks.getNewsSummaryLlmConfig.mockReturnValue(null);
+
+    const response = await POST(
+      new Request("http://localhost/api/gappers/news-summaries", {
+        body: JSON.stringify({
+          model: "gpt-4o-mini",
+          provider: "openai",
+          tickers: [
+            {
+              previousCloseAt: "2026-06-03T20:00:00.000Z",
+              symbol: "acme",
+            },
+          ],
+        }),
+        method: "POST",
+      }),
+    );
+
+    expect(response.status).toBe(400);
+    await expect(response.json()).resolves.toEqual({
+      error: "OpenAI API key is not configured for news summaries.",
     });
     expect(mocks.getTickerNews).not.toHaveBeenCalled();
   });
