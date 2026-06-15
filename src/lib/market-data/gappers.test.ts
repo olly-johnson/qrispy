@@ -138,6 +138,38 @@ describe("buildGappersSnapshot", () => {
     );
   });
 
+  it("uses requested search criteria when choosing extended-hours candidates", async () => {
+    const provider = providerWith({
+      aggregateBars: {
+        HIGH: [bar("HIGH", "2026-06-04T12:00:00.000Z", 10.7, 20_000)],
+        LOW: [bar("LOW", "2026-06-04T12:00:00.000Z", 10.5, 30_000)],
+      },
+      snapshots: [
+        snapshot("LOW", { price: 10.5, previousClose: 10, regularVolume: 0 }),
+        snapshot("HIGH", { price: 10.7, previousClose: 10, regularVolume: 0 }),
+      ],
+      tickers: [
+        ticker("LOW", "Low Gap Corp", "CS", "stocks"),
+        ticker("HIGH", "High Gap Corp", "CS", "stocks"),
+      ],
+    });
+
+    const result = await buildGappersSnapshot({
+      filters: {
+        minGapPercent: 4,
+        minPrice: 0.5,
+      },
+      now: new Date("2026-06-04T12:00:00.000Z"),
+      provider,
+    });
+
+    expect(result.error).toBeNull();
+    expect(result.rows.map((row) => row.symbol)).toEqual(["LOW", "HIGH"]);
+    expect(provider.getAggregateBars).toHaveBeenCalledWith(
+      expect.objectContaining({ symbol: "LOW" }),
+    );
+  });
+
   it("uses regular-session volume outside premarket and keeps sorting by dollar volume", async () => {
     const provider = providerWith({
       aggregateBars: {},

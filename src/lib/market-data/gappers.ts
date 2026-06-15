@@ -31,6 +31,11 @@ export type GappersSnapshot = {
   rows: GappersRow[];
 };
 
+export type GappersSnapshotFilters = {
+  minGapPercent?: number;
+  minPrice?: number;
+};
+
 export type GappersDataProvider = {
   getActiveStockTickers(): Promise<MassiveReferenceTicker[]>;
   getAggregateBars(request: MarketDataRequest): Promise<OhlcvBar[]>;
@@ -47,15 +52,19 @@ const MIN_SERVER_PRICE = 0.5;
 const MIN_SERVER_GAP_PERCENT = 6;
 
 export async function buildGappersSnapshot({
+  filters,
   now = new Date(),
   provider,
 }: {
+  filters?: GappersSnapshotFilters;
   now?: Date;
   provider: GappersDataProvider | null;
 }): Promise<GappersSnapshot> {
   const mode = getGappersMode(now);
   const loadedAt = now.toISOString();
   const previousCloseAt = getPreviousRegularCloseAt(now).toISOString();
+  const minGapPercent = filters?.minGapPercent ?? MIN_SERVER_GAP_PERCENT;
+  const minPrice = filters?.minPrice ?? MIN_SERVER_PRICE;
 
   if (!provider) {
     return {
@@ -83,7 +92,7 @@ export async function buildGappersSnapshot({
       )
       .filter((row): row is Omit<GappersRow, "previousCloseAt"> => row != null)
       .map((row) => ({ ...row, previousCloseAt }))
-      .filter((row) => row.price > MIN_SERVER_PRICE && row.gapPercent >= MIN_SERVER_GAP_PERCENT);
+      .filter((row) => row.price > minPrice && row.gapPercent >= minGapPercent);
 
     const rows =
       mode === "extended"

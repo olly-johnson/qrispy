@@ -1,19 +1,19 @@
 "use client";
 
 import { RefreshCw, Sparkles } from "lucide-react";
-import { useRouter } from "next/navigation";
+import { usePathname, useRouter } from "next/navigation";
 import { useEffect, useMemo, useState, useTransition } from "react";
 
 import { formatDateTime, formatPercent } from "@/components/format";
 import type { GappersMode, GappersRow } from "@/lib/market-data/gappers";
 import {
   buildGappersSummaryRequests,
-  DEFAULT_GAPPERS_FILTERS,
   filterGappersRows,
   getCachedGappersSummaryResults,
   getLastGappersSummaryResults,
   saveGappersSummaryResults,
   saveLastGappersSummaryResults,
+  serializeGappersFiltersSearchParams,
   type GappersFilters,
   type GappersNewsSummaryResult,
 } from "@/lib/market-data/gappers-client";
@@ -24,17 +24,20 @@ const NEWS_SUMMARY_MODELS = ["gpt-4o-mini", "gpt-4o-2024-08-06"] as const;
 
 export function GappersTable({
   error,
+  initialFilters,
   loadedAt,
   mode,
   rows,
 }: {
   error: string | null;
+  initialFilters: GappersFilters;
   loadedAt: string;
   mode: GappersMode;
   rows: GappersRow[];
 }) {
+  const pathname = usePathname();
   const router = useRouter();
-  const [filters, setFilters] = useState<GappersFilters>(DEFAULT_GAPPERS_FILTERS);
+  const [filters, setFilters] = useState<GappersFilters>(initialFilters);
   const [isSummarizing, setIsSummarizing] = useState(false);
   const [newsModel, setNewsModel] = useState<(typeof NEWS_SUMMARY_MODELS)[number]>("gpt-4o-mini");
   const [newsProvider, setNewsProvider] = useState("openai");
@@ -71,6 +74,23 @@ export function GappersTable({
 
   const refresh = () => {
     startTransition(() => router.refresh());
+  };
+
+  const updateFilters = (nextFilters: GappersFilters) => {
+    setFilters(nextFilters);
+
+    const params = serializeGappersFiltersSearchParams(nextFilters);
+
+    startTransition(() => {
+      router.replace(`${pathname}?${params.toString()}`, { scroll: false });
+    });
+  };
+
+  const updateFilter = <Key extends keyof GappersFilters>(
+    key: Key,
+    value: GappersFilters[Key],
+  ) => {
+    updateFilters({ ...filters, [key]: value });
   };
 
   const toggleSymbol = (symbol: string, checked: boolean) => {
@@ -208,33 +228,33 @@ export function GappersTable({
           <NumberInput
             label="Min price"
             min={0}
-            onChange={(value) => setFilters((current) => ({ ...current, minPrice: value }))}
+            onChange={(value) => updateFilter("minPrice", value)}
             step={0.01}
             value={filters.minPrice}
           />
           <NumberInput
             label="Min gap %"
             min={0}
-            onChange={(value) => setFilters((current) => ({ ...current, minGapPercent: value }))}
+            onChange={(value) => updateFilter("minGapPercent", value)}
             step={0.1}
             value={filters.minGapPercent}
           />
           <NumberInput
             label="Min dollar volume"
             min={0}
-            onChange={(value) => setFilters((current) => ({ ...current, minDollarVolume: value }))}
+            onChange={(value) => updateFilter("minDollarVolume", value)}
             step={10_000}
             value={filters.minDollarVolume}
           />
           <Toggle
             checked={filters.includeStocks}
             label="Stocks"
-            onChange={(checked) => setFilters((current) => ({ ...current, includeStocks: checked }))}
+            onChange={(checked) => updateFilter("includeStocks", checked)}
           />
           <Toggle
             checked={filters.includeEtfs}
             label="ETFs"
-            onChange={(checked) => setFilters((current) => ({ ...current, includeEtfs: checked }))}
+            onChange={(checked) => updateFilter("includeEtfs", checked)}
           />
         </div>
         <div className="mt-4 text-sm text-zinc-500">

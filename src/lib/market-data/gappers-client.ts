@@ -26,6 +26,49 @@ export const DEFAULT_GAPPERS_FILTERS: GappersFilters = {
   minPrice: 0.5,
 };
 
+type GappersSearchParams =
+  | Record<string, string | string[] | undefined>
+  | URLSearchParams;
+
+export function parseGappersFiltersSearchParams(
+  params: GappersSearchParams,
+): GappersFilters {
+  return {
+    includeEtfs: booleanSearchParam(
+      searchParamValue(params, "includeEtfs"),
+      DEFAULT_GAPPERS_FILTERS.includeEtfs,
+    ),
+    includeStocks: booleanSearchParam(
+      searchParamValue(params, "includeStocks"),
+      DEFAULT_GAPPERS_FILTERS.includeStocks,
+    ),
+    minDollarVolume: numericSearchParam(
+      searchParamValue(params, "minDollarVolume"),
+      DEFAULT_GAPPERS_FILTERS.minDollarVolume,
+    ),
+    minGapPercent: numericSearchParam(
+      searchParamValue(params, "minGapPercent"),
+      DEFAULT_GAPPERS_FILTERS.minGapPercent,
+    ),
+    minPrice: numericSearchParam(
+      searchParamValue(params, "minPrice"),
+      DEFAULT_GAPPERS_FILTERS.minPrice,
+    ),
+  };
+}
+
+export function serializeGappersFiltersSearchParams(filters: GappersFilters) {
+  const params = new URLSearchParams();
+
+  params.set("minPrice", String(filters.minPrice));
+  params.set("minGapPercent", String(filters.minGapPercent));
+  params.set("minDollarVolume", String(filters.minDollarVolume));
+  params.set("includeStocks", String(filters.includeStocks));
+  params.set("includeEtfs", String(filters.includeEtfs));
+
+  return params;
+}
+
 export function filterGappersRows(rows: GappersRow[], filters: GappersFilters) {
   return rows.filter((row) => {
     if (row.price <= filters.minPrice) {
@@ -58,6 +101,43 @@ export function buildGappersSummaryRequests(
       previousCloseAt: row.previousCloseAt,
       symbol: row.symbol,
     }));
+}
+
+function searchParamValue(params: GappersSearchParams, key: string) {
+  if (params instanceof URLSearchParams) {
+    return params.get(key) ?? undefined;
+  }
+
+  const value = params[key];
+
+  return Array.isArray(value) ? value[0] : value;
+}
+
+function numericSearchParam(value: string | undefined, fallback: number) {
+  if (value == null || value.trim() === "") {
+    return fallback;
+  }
+
+  const parsed = Number(value);
+
+  return Number.isFinite(parsed) && parsed >= 0 ? parsed : fallback;
+}
+
+function booleanSearchParam(value: string | undefined, fallback: boolean) {
+  if (value == null) {
+    return fallback;
+  }
+
+  const normalized = value.toLowerCase();
+
+  if (normalized === "true" || normalized === "1") {
+    return true;
+  }
+  if (normalized === "false" || normalized === "0") {
+    return false;
+  }
+
+  return fallback;
 }
 
 type SummaryStorage = Pick<Storage, "getItem" | "setItem">;
