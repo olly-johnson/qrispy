@@ -236,10 +236,14 @@ function CountPair({
   tone,
   up,
 }: {
-  down: number;
+  down: number | null;
   tone?: "down" | "up";
-  up: number;
+  up: number | null;
 }) {
+  if (up == null || down == null) {
+    return "--";
+  }
+
   return (
     <>
       <span className={tone === "up" ? "text-emerald-200" : undefined}>{up} up</span>
@@ -258,6 +262,15 @@ function CoverageNote({ snapshot }: { snapshot: SectorBreadthSnapshot }) {
       {snapshot.coverage.totalCommonStocks.toLocaleString("en-US")} common stocks.{" "}
       {snapshot.coverage.unmapped.toLocaleString("en-US")} unclassified excluded from sector totals.{" "}
       T2108 coverage: {snapshot.liveBreadth.t2108Covered.toLocaleString("en-US")} stocks.
+      {snapshot.liveBreadth.isHistoricalStale ? (
+        <>
+          {" "}
+          Historical breadth cache is stale
+          {snapshot.liveBreadth.historyEndDate
+            ? `; latest cached daily bars: ${snapshot.liveBreadth.historyEndDate}.`
+            : "."}
+        </>
+      ) : null}
     </section>
   );
 }
@@ -346,9 +359,13 @@ export function countBalanceTone({
   down,
   up,
 }: {
-  down: number;
-  up: number;
+  down: number | null;
+  up: number | null;
 }) {
+  if (up == null || down == null) {
+    return undefined;
+  }
+
   if (up > down) {
     return "up";
   }

@@ -18,6 +18,8 @@ describe("buildSectorBreadthSnapshot", () => {
       ],
       historicalMetrics: {
         down13In34Days: 1,
+        historyEndDate: "2026-06-10",
+        isStale: false,
         ratio10Day: 1.1,
         ratio5Day: 1.4,
         t2108: 66.67,
@@ -45,6 +47,8 @@ describe("buildSectorBreadthSnapshot", () => {
       down4Percent: 1,
       flat: 1,
       green: 1,
+      historyEndDate: "2026-06-10",
+      isHistoricalStale: false,
       ratio10Day: 1.1,
       ratio5Day: 1.4,
       red: 1,
@@ -87,6 +91,8 @@ describe("calculateHistoricalBreadthMetrics", () => {
 
     expect(metrics).toEqual({
       down13In34Days: 1,
+      historyEndDate: null,
+      isStale: false,
       ratio10Day: expect.any(Number),
       ratio5Day: expect.any(Number),
       t2108: 66.67,

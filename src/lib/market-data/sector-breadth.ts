@@ -36,12 +36,14 @@ export type SectorBreadthSector = {
 };
 
 export type HistoricalBreadthMetrics = {
-  down13In34Days: number;
+  down13In34Days: number | null;
+  historyEndDate: string | null;
+  isStale: boolean;
   ratio10Day: number | null;
   ratio5Day: number | null;
   t2108: number | null;
   t2108Covered: number;
-  up13In34Days: number;
+  up13In34Days: number | null;
 };
 
 export type SectorBreadthSnapshot = {
@@ -52,16 +54,18 @@ export type SectorBreadthSnapshot = {
     withLiveSnapshot: number;
   };
   liveBreadth: {
-    down13In34Days: number;
+    down13In34Days: number | null;
     down4Percent: number;
     flat: number;
     green: number;
+    historyEndDate: string | null;
+    isHistoricalStale: boolean;
     ratio10Day: number | null;
     ratio5Day: number | null;
     red: number;
     t2108: number | null;
     t2108Covered: number;
-    up13In34Days: number;
+    up13In34Days: number | null;
     up4Percent: number;
   };
   loadedAt: string;
@@ -121,6 +125,8 @@ export function buildSectorBreadthSnapshot(input: {
       down4Percent: stocks.filter((stock) => stock.todayPercent <= -4).length,
       flat: liveCounts.flat,
       green: liveCounts.up,
+      historyEndDate: input.historicalMetrics.historyEndDate,
+      isHistoricalStale: input.historicalMetrics.isStale,
       ratio10Day: input.historicalMetrics.ratio10Day,
       ratio5Day: input.historicalMetrics.ratio5Day,
       red: liveCounts.down,
@@ -210,6 +216,8 @@ export function calculateHistoricalBreadthMetrics(input: {
 
   return {
     down13In34Days,
+    historyEndDate: null,
+    isStale: false,
     ratio10Day: ratioForTail(withToday, 10),
     ratio5Day: ratioForTail(withToday, 5),
     t2108:
