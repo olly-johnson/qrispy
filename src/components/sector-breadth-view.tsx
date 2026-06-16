@@ -164,20 +164,11 @@ function BreadthCards({ snapshot }: { snapshot: SectorBreadthSnapshot }) {
     down: snapshot.liveBreadth.down4Percent,
     up: snapshot.liveBreadth.up4Percent,
   });
-  const longerMoveTone = countBalanceTone({
-    down: snapshot.liveBreadth.down13In34Days,
-    up: snapshot.liveBreadth.up13In34Days,
-  });
 
   return (
-    <section className="mt-6 grid gap-4 sm:grid-cols-2 xl:grid-cols-5">
+    <section className="mt-6 grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
       <Card
-        label="T2108"
-        tone={thresholdTone(snapshot.liveBreadth.t2108, 50)}
-        value={formatNullablePercent(snapshot.liveBreadth.t2108)}
-      />
-      <Card
-        label="4% Today"
+        label={visibleBreadthCardLabels()[0] ?? "4% Today"}
         tone={todayTone}
         value={
           <CountPair
@@ -187,29 +178,12 @@ function BreadthCards({ snapshot }: { snapshot: SectorBreadthSnapshot }) {
           />
         }
       />
-      <Card
-        label="13% in 34 Days"
-        tone={longerMoveTone}
-        value={
-          <CountPair
-            down={snapshot.liveBreadth.down13In34Days}
-            tone={longerMoveTone}
-            up={snapshot.liveBreadth.up13In34Days}
-          />
-        }
-      />
-      <Card
-        label="5d Ratio"
-        tone={thresholdTone(snapshot.liveBreadth.ratio5Day, 1)}
-        value={formatNullableNumber(snapshot.liveBreadth.ratio5Day)}
-      />
-      <Card
-        label="10d Ratio"
-        tone={thresholdTone(snapshot.liveBreadth.ratio10Day, 1)}
-        value={formatNullableNumber(snapshot.liveBreadth.ratio10Day)}
-      />
     </section>
   );
+}
+
+export function visibleBreadthCardLabels() {
+  return ["4% Today"];
 }
 
 function Card({
@@ -261,16 +235,7 @@ function CoverageNote({ snapshot }: { snapshot: SectorBreadthSnapshot }) {
       {snapshot.coverage.mapped.toLocaleString("en-US")} classified /{" "}
       {snapshot.coverage.totalCommonStocks.toLocaleString("en-US")} common stocks.{" "}
       {snapshot.coverage.unmapped.toLocaleString("en-US")} unclassified excluded from sector totals.{" "}
-      T2108 coverage: {snapshot.liveBreadth.t2108Covered.toLocaleString("en-US")} stocks.
-      {snapshot.liveBreadth.isHistoricalStale ? (
-        <>
-          {" "}
-          Historical breadth cache is stale
-          {snapshot.liveBreadth.historyEndDate
-            ? `; latest cached daily bars: ${snapshot.liveBreadth.historyEndDate}.`
-            : "."}
-        </>
-      ) : null}
+      Live snapshots: {snapshot.coverage.withLiveSnapshot.toLocaleString("en-US")} stocks.
     </section>
   );
 }
@@ -443,14 +408,6 @@ function formatMoney(value: number) {
     minimumFractionDigits: 2,
     style: "currency",
   }).format(value);
-}
-
-function formatNullableNumber(value: number | null) {
-  return value == null ? "--" : value.toFixed(2);
-}
-
-function formatNullablePercent(value: number | null) {
-  return value == null ? "--" : `${value.toFixed(1)}%`;
 }
 
 function formatPercentValue(value: number) {
