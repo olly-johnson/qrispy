@@ -23,6 +23,8 @@ describe("readCachedBreadthMetrics", () => {
       }),
     ).resolves.toEqual({
       down13In34Days: 7,
+      historyEndDate: null,
+      isStale: false,
       ratio10Day: 1.8,
       ratio5Day: 1.2,
       t2108: 55.25,
@@ -49,12 +51,46 @@ describe("readCachedBreadthMetrics", () => {
         todayUp4Percent: 0,
       }),
     ).resolves.toEqual({
-      down13In34Days: 0,
+      down13In34Days: null,
+      historyEndDate: null,
+      isStale: false,
       ratio10Day: null,
       ratio5Day: null,
       t2108: null,
       t2108Covered: 0,
-      up13In34Days: 0,
+      up13In34Days: null,
+    });
+  });
+
+  it("hides stale cached historical metrics and keeps the latest cache date", async () => {
+    const client = fakeRpcClient({
+      down_13_in_34_days: 1040,
+      history_end_date: "2026-06-10",
+      is_stale: true,
+      ratio_10_day: 0.7,
+      ratio_5_day: 0.56,
+      t2108: 47.1,
+      t2108_covered: 4098,
+      up_13_in_34_days: 732,
+    });
+
+    await expect(
+      readCachedBreadthMetrics({
+        asOfDate: "2026-06-15",
+        client,
+        symbols: ["ACME"],
+        todayDown4Percent: 325,
+        todayUp4Percent: 483,
+      }),
+    ).resolves.toEqual({
+      down13In34Days: null,
+      historyEndDate: "2026-06-10",
+      isStale: true,
+      ratio10Day: null,
+      ratio5Day: null,
+      t2108: null,
+      t2108Covered: 0,
+      up13In34Days: null,
     });
   });
 });

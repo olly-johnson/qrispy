@@ -212,6 +212,27 @@ describe("Cached sector breadth metrics migration", () => {
       "grant execute on function public.calculate_cached_breadth_metrics",
     );
   });
+
+  it("adds freshness metadata and avoids double-counting the live as-of date", () => {
+    const migrationName = readdirSync(
+      join(process.cwd(), "supabase", "migrations"),
+    ).find((name) =>
+      name.endsWith("_add_cached_breadth_metrics_freshness.sql"),
+    );
+    expect(migrationName).toBeDefined();
+
+    const sql = readFileSync(
+      join(process.cwd(), "supabase", "migrations", migrationName!),
+      "utf8",
+    );
+
+    expect(sql).toContain("history_end_date date");
+    expect(sql).toContain("is_stale boolean");
+    expect(sql).toContain("minimum_fresh_date");
+    expect(sql.replace(/\s+/g, " ")).toContain(
+      "from daily_counts where trade_date < as_of_date",
+    );
+  });
 });
 
 describe("Cached breadth metrics index migration", () => {

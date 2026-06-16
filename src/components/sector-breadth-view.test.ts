@@ -4,7 +4,14 @@ import {
   breadthCountTone,
   countBalanceTone,
   thresholdTone,
+  visibleBreadthCardLabels,
 } from "./sector-breadth-view";
+
+describe("visibleBreadthCardLabels", () => {
+  it("keeps only the live 4% breadth card above sectors", () => {
+    expect(visibleBreadthCardLabels()).toEqual(["4% Today"]);
+  });
+});
 
 describe("breadthCountTone", () => {
   it("only highlights the count that is greater", () => {

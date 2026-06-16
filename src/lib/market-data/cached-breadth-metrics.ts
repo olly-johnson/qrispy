@@ -16,12 +16,14 @@ type CachedBreadthMetricsClient = {
 };
 
 const EMPTY_METRICS: HistoricalBreadthMetrics = {
-  down13In34Days: 0,
+  down13In34Days: null,
+  historyEndDate: null,
+  isStale: false,
   ratio10Day: null,
   ratio5Day: null,
   t2108: null,
   t2108Covered: 0,
-  up13In34Days: 0,
+  up13In34Days: null,
 };
 
 export async function readCachedBreadthMetrics(input: {
@@ -45,8 +47,21 @@ export async function readCachedBreadthMetrics(input: {
     return EMPTY_METRICS;
   }
 
+  const historyEndDate = dateStringOrNull(row.history_end_date);
+  const isStale = row.is_stale === true || row.is_stale === "true";
+
+  if (isStale) {
+    return {
+      ...EMPTY_METRICS,
+      historyEndDate,
+      isStale: true,
+    };
+  }
+
   return {
     down13In34Days: numberOrZero(row.down_13_in_34_days),
+    historyEndDate,
+    isStale: false,
     ratio10Day: numberOrNull(row.ratio_10_day),
     ratio5Day: numberOrNull(row.ratio_5_day),
     t2108: numberOrNull(row.t2108),
@@ -73,4 +88,15 @@ function numberOrNull(value: unknown) {
 
 function numberOrZero(value: unknown) {
   return numberOrNull(value) ?? 0;
+}
+
+function dateStringOrNull(value: unknown) {
+  if (value instanceof Date) {
+    return value.toISOString().slice(0, 10);
+  }
+  if (typeof value !== "string" || !value.trim()) {
+    return null;
+  }
+
+  return value.slice(0, 10);
 }
