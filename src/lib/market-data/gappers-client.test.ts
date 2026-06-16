@@ -194,6 +194,115 @@ describe("gapper summary cache", () => {
     });
   });
 
+  it("expires cached summaries when a trading-day premarket session opens", () => {
+    const storage = new MemoryStorage();
+    const requests = [
+      {
+        previousCloseAt: "2026-06-17T20:00:00.000Z",
+        symbol: "STI",
+      },
+    ];
+
+    saveGappersSummaryResults({
+      model: "gpt-4o-mini",
+      now: Date.parse("2026-06-18T07:45:00.000Z"),
+      provider: "openai",
+      requests,
+      results: [
+        {
+          message: "No Massive news found after previous close.",
+          status: "no_news",
+          symbol: "STI",
+        },
+      ],
+      storage,
+    });
+
+    expect(
+      getCachedGappersSummaryResults({
+        maxAgeMs: 7 * 24 * 60 * 60 * 1000,
+        model: "gpt-4o-mini",
+        now: Date.parse("2026-06-18T07:59:59.000Z"),
+        provider: "openai",
+        requests,
+        storage,
+      }).cachedResults.map((result) => result.symbol),
+    ).toEqual(["STI"]);
+
+    expect(
+      getCachedGappersSummaryResults({
+        maxAgeMs: 7 * 24 * 60 * 60 * 1000,
+        model: "gpt-4o-mini",
+        now: Date.parse("2026-06-18T08:00:00.000Z"),
+        provider: "openai",
+        requests,
+        storage,
+      }),
+    ).toEqual({
+      cachedResults: [],
+      missingRequests: requests,
+    });
+  });
+
+  it("does not reset cached summaries at 4:00 AM ET on market holidays or weekends", () => {
+    const storage = new MemoryStorage();
+    const requests = [
+      {
+        previousCloseAt: "2026-06-18T20:00:00.000Z",
+        symbol: "STI",
+      },
+    ];
+    const results = [
+      {
+        message: "No Massive news found after previous close.",
+        status: "no_news" as const,
+        symbol: "STI",
+      },
+    ];
+
+    saveGappersSummaryResults({
+      model: "gpt-4o-mini",
+      now: Date.parse("2026-06-18T20:00:00.000Z"),
+      provider: "openai",
+      requests,
+      results,
+      storage,
+    });
+
+    for (const now of [
+      "2026-06-19T08:30:00.000Z",
+      "2026-06-20T08:30:00.000Z",
+    ]) {
+      expect(
+        getCachedGappersSummaryResults({
+          maxAgeMs: 7 * 24 * 60 * 60 * 1000,
+          model: "gpt-4o-mini",
+          now: Date.parse(now),
+          provider: "openai",
+          requests,
+          storage,
+        }),
+      ).toEqual({
+        cachedResults: results,
+        missingRequests: [],
+      });
+    }
+
+    expect(
+      getCachedGappersSummaryResults({
+        maxAgeMs: 7 * 24 * 60 * 60 * 1000,
+        model: "gpt-4o-mini",
+        now: Date.parse("2026-06-22T08:00:00.000Z"),
+        provider: "openai",
+        requests,
+        storage,
+      }),
+    ).toEqual({
+      cachedResults: [],
+      missingRequests: requests,
+    });
+  });
+
   it("restores the last displayed summary results while they are fresh", () => {
     const storage = new MemoryStorage();
     const results = [
@@ -217,6 +326,38 @@ describe("gapper summary cache", () => {
       getLastGappersSummaryResults({
         maxAgeMs: 60_000,
         now: 70_001,
+        storage,
+      }),
+    ).toEqual([]);
+  });
+
+  it("expires the last displayed summary results when a trading-day premarket session opens", () => {
+    const storage = new MemoryStorage();
+    const results = [
+      {
+        message: "No Massive news found after previous close.",
+        status: "no_news" as const,
+        symbol: "STI",
+      },
+    ];
+
+    saveLastGappersSummaryResults({
+      now: Date.parse("2026-06-18T20:00:00.000Z"),
+      results,
+      storage,
+    });
+
+    expect(
+      getLastGappersSummaryResults({
+        maxAgeMs: 7 * 24 * 60 * 60 * 1000,
+        now: Date.parse("2026-06-19T08:30:00.000Z"),
+        storage,
+      }),
+    ).toEqual(results);
+    expect(
+      getLastGappersSummaryResults({
+        maxAgeMs: 7 * 24 * 60 * 60 * 1000,
+        now: Date.parse("2026-06-22T08:00:00.000Z"),
         storage,
       }),
     ).toEqual([]);
