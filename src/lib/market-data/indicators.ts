@@ -5,6 +5,12 @@ type ClosePoint = {
   close: number;
 };
 
+type VwapPoint = ClosePoint & {
+  high: number;
+  low: number;
+  volume: number;
+};
+
 export function sma(points: ClosePoint[], period: number): IndicatorPoint[] {
   const values: IndicatorPoint[] = [];
   let sum = 0;
@@ -47,6 +53,38 @@ export function ema(points: ClosePoint[], period: number): IndicatorPoint[] {
     values.push({
       time: points[index].time,
       value: roundIndicator(previous),
+    });
+  }
+
+  return values;
+}
+
+export function vwap(points: VwapPoint[]): IndicatorPoint[] {
+  const values: IndicatorPoint[] = [];
+  let session = "";
+  let cumulativePriceVolume = 0;
+  let cumulativeVolume = 0;
+
+  for (const point of points) {
+    const nextSession = new Intl.DateTimeFormat("en-CA", {
+      day: "2-digit",
+      month: "2-digit",
+      timeZone: "America/New_York",
+      year: "numeric",
+    }).format(new Date(point.time));
+
+    if (nextSession !== session) {
+      session = nextSession;
+      cumulativePriceVolume = 0;
+      cumulativeVolume = 0;
+    }
+
+    const typicalPrice = (point.high + point.low + point.close) / 3;
+    cumulativePriceVolume += typicalPrice * point.volume;
+    cumulativeVolume += point.volume;
+    values.push({
+      time: point.time,
+      value: roundIndicator(cumulativePriceVolume / cumulativeVolume),
     });
   }
 
