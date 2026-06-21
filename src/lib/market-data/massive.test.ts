@@ -3,6 +3,30 @@ import { describe, expect, it, vi } from "vitest";
 import { MassiveMarketDataProvider } from "./massive";
 
 describe("MassiveMarketDataProvider", () => {
+  it("fetches one-minute aggregate bars", async () => {
+    const fetcher = vi.fn().mockResolvedValue({
+      ok: true,
+      status: 200,
+      json: async () => ({ results: [] }),
+    });
+    const provider = new MassiveMarketDataProvider({
+      apiKey: "massive-key",
+      fetcher,
+    });
+
+    await provider.getAggregateBars({
+      symbol: "acme",
+      timeframe: "1m",
+      from: "2026-01-02",
+      to: "2026-01-02",
+      adjusted: false,
+    });
+
+    expect(new URL(fetcher.mock.calls[0][0]).pathname).toBe(
+      "/v2/aggs/ticker/ACME/range/1/minute/2026-01-02/2026-01-02",
+    );
+  });
+
   it("fetches unadjusted aggregate bars and normalizes them", async () => {
     const fetcher = vi.fn().mockResolvedValue({
       ok: true,

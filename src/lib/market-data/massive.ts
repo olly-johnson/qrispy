@@ -46,6 +46,7 @@ export type MassiveTickerDetails = {
 const TIMEFRAME_PATH: Record<MarketDataTimeframe, { multiplier: number; timespan: string }> = {
   "1d": { multiplier: 1, timespan: "day" },
   "1w": { multiplier: 1, timespan: "week" },
+  "1m": { multiplier: 1, timespan: "minute" },
   "5m": { multiplier: 5, timespan: "minute" },
   "1h": { multiplier: 1, timespan: "hour" },
 };
