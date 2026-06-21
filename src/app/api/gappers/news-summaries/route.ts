@@ -40,7 +40,14 @@ export async function POST(request: Request) {
     requestedProvider: body.provider ?? configured?.provider ?? "openai",
   });
 
-  if (!configured || configured.provider !== selection.provider) {
+  if (!configured) {
+    return Response.json(
+      { error: "OpenAI API key is not configured for news summaries." },
+      { status: 400 },
+    );
+  }
+
+  if (configured.provider !== selection.provider) {
     return Response.json(
       { error: "Selected news summary provider is not configured." },
       { status: 400 },
