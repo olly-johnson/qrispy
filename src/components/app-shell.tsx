@@ -3,6 +3,7 @@ import {
   Activity,
   BarChart3,
   BriefcaseBusiness,
+  CandlestickChart,
   Layers3,
   ListChecks,
   Settings,
@@ -14,6 +15,7 @@ import type { AppUser } from "@/lib/auth/session";
 
 const navItems = [
   { href: "/dashboard", label: "Dashboard", icon: WalletCards },
+  { href: "/charts", label: "Charts", icon: CandlestickChart },
   { href: "/trades", label: "Trades", icon: BarChart3 },
   { href: "/positions", label: "Positions", icon: BriefcaseBusiness },
   { href: "/gappers", label: "Gappers", icon: TrendingUp },

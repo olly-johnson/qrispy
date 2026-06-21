@@ -1,4 +1,4 @@
-export type MarketDataTimeframe = "1d" | "1w" | "5m" | "1h";
+export type MarketDataTimeframe = "1d" | "1w" | "1m" | "5m" | "1h";
 
 export type OhlcvBar = {
   provider: string;
