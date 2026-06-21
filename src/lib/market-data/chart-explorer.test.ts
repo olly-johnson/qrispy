@@ -1,14 +1,15 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 
 import {
   chartExplorerOverlays,
   dailyViewport,
   filterRegularSessionBars,
+  getChartExplorerDatasets,
   parseChartExplorerSearchParams,
   serializeChartExplorerSearchParams,
   validateChartExplorerFilters,
 } from "./chart-explorer";
-import type { OhlcvBar } from "./types";
+import type { MarketDataProvider, OhlcvBar } from "./types";
 
 describe("chart explorer filters", () => {
   it("normalizes ticker and serializes a shareable URL query", () => {
@@ -97,6 +98,30 @@ describe("chart explorer overlays", () => {
   });
 });
 
+describe("chart explorer data loading", () => {
+  it("returns a readable error when Massive rejects a historical range", async () => {
+    const provider: MarketDataProvider = {
+      name: "massive",
+      getAggregateBars: vi.fn().mockRejectedValue(
+        new Error("Massive aggregate request failed with 403"),
+      ),
+    };
+
+    await expect(
+      getChartExplorerDatasets({
+        client: emptyMarketDataClient(),
+        filters: { symbol: "GOTO", from: "2020-08-03", to: "2020-08-13" },
+        provider,
+      }),
+    ).resolves.toEqual({
+      daily: null,
+      intraday: null,
+      error:
+        "Massive does not authorize this historical range. Your plan may not include aggregate data for these dates.",
+    });
+  });
+});
+
 function bar(
   barStartAt: string,
   timeframe: OhlcvBar["timeframe"] = "1m",
@@ -114,5 +139,34 @@ function bar(
     volume: 100,
     adjusted: false,
     rawPayload: {},
+  };
+}
+
+function emptyMarketDataClient() {
+  return {
+    from(table: string) {
+      if (table === "ohlcv_bars") {
+        return {
+          select: () => ({
+            eq: () => ({
+              eq: () => ({
+                eq: () => ({
+                  eq: () => ({
+                    gte: () => ({
+                      lte: () => ({
+                        order: vi.fn().mockResolvedValue({ data: [], error: null }),
+                      }),
+                    }),
+                  }),
+                }),
+              }),
+            }),
+          }),
+          upsert: vi.fn().mockResolvedValue({ error: null }),
+        };
+      }
+
+      return { insert: vi.fn().mockResolvedValue({ error: null }) };
+    },
   };
 }

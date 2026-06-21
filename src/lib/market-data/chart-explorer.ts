@@ -105,22 +105,31 @@ export async function getChartExplorerDatasets(input: {
   }
 
   const { filters, provider } = input;
-  const [dailyBars, hourlyBars, fiveMinuteBars, oneMinuteBars] = await Promise.all([
-    getCachedOrFetchBars({
-      client: input.client,
-      provider,
-      request: {
-        symbol: filters.symbol,
-        timeframe: "1d",
-        from: addDays(filters.from, -DAILY_PADDING_DAYS_BEFORE),
-        to: addDays(filters.to, DAILY_PADDING_DAYS_AFTER),
-        adjusted: false,
-      },
-    }),
-    getIntradayBars({ client: input.client, filters, provider }, "1h"),
-    getIntradayBars({ client: input.client, filters, provider }, "5m"),
-    getIntradayBars({ client: input.client, filters, provider }, "1m"),
-  ]);
+  let dailyBars: OhlcvBar[];
+  let hourlyBars: OhlcvBar[];
+  let fiveMinuteBars: OhlcvBar[];
+  let oneMinuteBars: OhlcvBar[];
+
+  try {
+    [dailyBars, hourlyBars, fiveMinuteBars, oneMinuteBars] = await Promise.all([
+      getCachedOrFetchBars({
+        client: input.client,
+        provider,
+        request: {
+          symbol: filters.symbol,
+          timeframe: "1d",
+          from: addDays(filters.from, -DAILY_PADDING_DAYS_BEFORE),
+          to: addDays(filters.to, DAILY_PADDING_DAYS_AFTER),
+          adjusted: false,
+        },
+      }),
+      getIntradayBars({ client: input.client, filters, provider }, "1h"),
+      getIntradayBars({ client: input.client, filters, provider }, "5m"),
+      getIntradayBars({ client: input.client, filters, provider }, "1m"),
+    ]);
+  } catch (error) {
+    return emptyResult(chartExplorerDataError(error));
+  }
 
   return {
     daily: dataset({
@@ -263,6 +272,14 @@ function dataset(input: {
 
 function emptyResult(error: string): ChartExplorerResult {
   return { daily: null, intraday: null, error };
+}
+
+function chartExplorerDataError(error: unknown) {
+  if (error instanceof Error && error.message.includes("failed with 403")) {
+    return "Massive does not authorize this historical range. Your plan may not include aggregate data for these dates.";
+  }
+
+  return "Market data could not be loaded for this range. Please try again.";
 }
 
 function searchParamValue(params: ChartExplorerSearchParams, key: string) {
