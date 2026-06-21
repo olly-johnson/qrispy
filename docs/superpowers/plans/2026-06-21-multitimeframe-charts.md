@@ -217,4 +217,3 @@ Expected: all tests pass, lint has no errors, and build exits 0.
 Run: `npm run dev`
 
 Expected: `/charts` shows the date form, both charts together, correct indicator legends/colors, switching intraday tabs, and horizontal panning. Capture a screenshot, push `codex/multitimeframe-charts`, and create a PR against `main` with the image and verification output.
-
