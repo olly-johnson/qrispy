@@ -72,8 +72,9 @@ export function TradeReviewGroupDetail({ group }: { group: TradeReviewGroupDetai
 
     setLoadingMemberKey(reconstructionKey);
     setMemberChartErrors((current) => {
-      const { [reconstructionKey]: _ignored, ...remaining } = current;
-      return remaining;
+      const next = { ...current };
+      delete next[reconstructionKey];
+      return next;
     });
     try {
       const charts = await loadTradeReviewMemberCharts(group.id, reconstructionKey);
