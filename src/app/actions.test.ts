@@ -215,6 +215,18 @@ describe("trade review group actions", () => {
     expect(revalidatePath).toHaveBeenCalledWith("/trades/groups/group-1");
   });
 
+  it("deletes a group when removing a member leaves only one trade", async () => {
+    vi.mocked(requireUser).mockResolvedValue({ id: "user-1", email: "test@example.com" });
+    const { from, calls } = reviewGroupClient({
+      remainingMembers: [{ reconstruction_key: "car-short" }],
+    });
+    vi.mocked(createSupabaseServerClient).mockResolvedValue({ from } as never);
+
+    await removeTradeReviewGroupMember("group-1", "car-long");
+
+    expect(calls.groupDeleteUserId).toHaveBeenCalledWith("user_id", "user-1");
+  });
+
   it("deletes only the owned group and revalidates its route", async () => {
     vi.mocked(requireUser).mockResolvedValue({ id: "user-1", email: "test@example.com" });
     const { from, calls } = reviewGroupClient();

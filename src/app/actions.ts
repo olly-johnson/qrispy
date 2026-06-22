@@ -202,7 +202,7 @@ export async function removeTradeReviewGroupMember(
     .eq("user_id", user.id)
     .eq("group_id", groupId);
   if (countError) throw countError;
-  if ((remaining ?? []).length === 0) {
+  if ((remaining ?? []).length < 2) {
     const { error: deleteError } = await supabase
       .from("trade_review_groups")
       .delete()
