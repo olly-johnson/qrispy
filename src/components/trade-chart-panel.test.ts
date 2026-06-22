@@ -1,4 +1,6 @@
 import { describe, expect, it } from "vitest";
+import { createElement } from "react";
+import { renderToStaticMarkup } from "react-dom/server";
 
 import {
   CHART_FONT_SIZE,
@@ -10,6 +12,7 @@ import {
   STOP_PRICE_LINE_STYLE,
   prepareChartData,
   prepareStopPriceLines,
+  TradeChartPanel,
 } from "./trade-chart-panel";
 import { LineStyle } from "lightweight-charts";
 import type { TradeChartDataset } from "@/lib/market-data/trade-charts";
@@ -58,6 +61,31 @@ describe("prepareChartData", () => {
         text: "5",
       }),
     ]);
+  });
+
+  it("uses a campaign marker label when one is provided", () => {
+    const prepared = prepareChartData({
+      id: "daily",
+      label: "Daily",
+      timeframe: "1d",
+      bars: [],
+      overlays: [],
+      markers: [
+        {
+          time: "2026-01-08T15:18:00.000Z",
+          price: 20,
+          quantity: 10,
+          side: "BUY",
+          role: "ENTRY",
+          text: "ENTRY 10 @ $20",
+          label: "T1 LONG ENTRY",
+        },
+      ],
+    } satisfies TradeChartDataset);
+
+    expect(prepared.markers[0]).toEqual(
+      expect.objectContaining({ text: "T1 LONG ENTRY" }),
+    );
   });
 
   it("keeps stop-loss lines out of indicator overlays", () => {
@@ -132,6 +160,19 @@ describe("marker label visibility", () => {
   it("uses larger marker glyphs and chart text for readable quantity labels", () => {
     expect(MARKER_SIZE).toBe(1.8);
     expect(CHART_FONT_SIZE).toBe(14);
+  });
+});
+
+describe("TradeChartPanel", () => {
+  it("uses the supplied title in its empty state", () => {
+    const html = renderToStaticMarkup(
+      createElement(TradeChartPanel, {
+        charts: { charts: [], error: null },
+        title: "Campaign chart",
+      }),
+    );
+
+    expect(html).toContain("Campaign chart");
   });
 });
 

@@ -45,9 +45,11 @@ export const MARKER_OPTIONS = {
 export function TradeChartPanel({
   charts,
   stopGroups = [],
+  title = "Charts",
 }: {
   charts?: TradeCharts;
   stopGroups?: PositionStopGroup[];
+  title?: string;
 }) {
   const availableCharts = charts?.charts ?? [];
   const [activeId, setActiveId] = useState(availableCharts[0]?.id ?? "daily");
@@ -80,7 +82,7 @@ export function TradeChartPanel({
   if (charts?.error) {
     return (
       <section className="mt-8 rounded-md border border-white/10 bg-white/[0.045] p-4">
-        <h2 className="text-lg font-semibold">Charts</h2>
+        <h2 className="text-lg font-semibold">{title}</h2>
         <p className="mt-2 text-sm text-zinc-500">{charts.error}</p>
       </section>
     );
@@ -89,7 +91,7 @@ export function TradeChartPanel({
   if (!activeChart) {
     return (
       <section className="mt-8 rounded-md border border-white/10 bg-white/[0.045] p-4">
-        <h2 className="text-lg font-semibold">Charts</h2>
+        <h2 className="text-lg font-semibold">{title}</h2>
         <p className="mt-2 text-sm text-zinc-500">
           No market data is available for this trade yet.
         </p>
@@ -100,7 +102,7 @@ export function TradeChartPanel({
   return (
     <section className="mt-8">
       <div className="flex flex-wrap items-center justify-between gap-3">
-        <h2 className="text-lg font-semibold">Charts</h2>
+        <h2 className="text-lg font-semibold">{title}</h2>
         <div className="flex flex-wrap gap-1 rounded-md border border-white/10 bg-white/[0.04] p-1">
           {availableCharts.map((chart) => (
             <button
@@ -455,7 +457,7 @@ export function prepareChartData(chart: TradeChartDataset) {
         shape: marker.role === "ENTRY" ? "arrowUp" : "arrowDown",
         color: marker.role === "ENTRY" ? "#22d3ee" : "#fb7185",
         size: MARKER_SIZE,
-        text: formatMarkerQuantity(marker.quantity),
+        text: marker.label ?? formatMarkerQuantity(marker.quantity),
       }),
     ),
   };

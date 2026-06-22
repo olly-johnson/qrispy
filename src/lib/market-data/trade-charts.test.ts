@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from "vitest";
 
-import { getTradeCharts } from "./trade-charts";
+import { getTradeCharts, getTradeReviewGroupCharts } from "./trade-charts";
 import type { MarketDataProvider, OhlcvBar } from "./types";
 import type { TradeDetail } from "@/lib/app-data";
 
@@ -108,6 +108,49 @@ describe("getTradeCharts", () => {
       expect.objectContaining({ from: "2025-12-29", to: "2026-01-18" }),
       expect.objectContaining({ from: "2025-12-29", to: "2026-01-18" }),
     ]);
+  });
+});
+
+describe("getTradeReviewGroupCharts", () => {
+  it("builds daily and hourly campaign charts with labelled fills for each trade", async () => {
+    const provider: MarketDataProvider = {
+      name: "massive",
+      getAggregateBars: vi.fn(async (request) =>
+        barsForRequest(request.timeframe, request.symbol),
+      ),
+    };
+
+    const result = await getTradeReviewGroupCharts({
+      symbol: "CAR",
+      openedAt: "2026-01-08T15:18:00.000Z",
+      closedAt: "2026-01-20T19:05:00.000Z",
+      trades: [
+        { direction: "LONG", fills: tradeDetail().fills },
+        {
+          direction: "SHORT",
+          fills: tradeDetail().fills.map((fill) => ({
+            ...fill,
+            executedAt: fill.executedAt.replace("08", "20"),
+          })),
+        },
+      ],
+      client: emptyMarketDataClient(),
+      provider,
+    });
+
+    expect(result.charts.map((chart) => chart.id)).toEqual(["daily", "hourly"]);
+    expect(result.charts[0]?.markers).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ label: "T1 LONG ENTRY" }),
+        expect.objectContaining({ label: "T2 SHORT EXIT" }),
+      ]),
+    );
+    expect(vi.mocked(provider.getAggregateBars).mock.calls.map(([request]) => request)).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ timeframe: "1d", from: "2024-08-26", to: "2026-05-20" }),
+        expect.objectContaining({ timeframe: "1h", from: "2026-01-06", to: "2026-01-22" }),
+      ]),
+    );
   });
 });
 

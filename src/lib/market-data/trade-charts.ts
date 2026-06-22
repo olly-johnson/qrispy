@@ -16,6 +16,7 @@ export type TradeChartMarker = {
   side: string;
   role: string;
   text: string;
+  label?: string;
 };
 
 export type TradeChartOverlay = {
@@ -44,6 +45,18 @@ type GetTradeChartsInput = {
   client: unknown;
   provider: MarketDataProvider | null;
   now?: Date;
+};
+
+type GetTradeReviewGroupChartsInput = {
+  symbol: string;
+  openedAt: string;
+  closedAt: string;
+  trades: Array<{
+    direction: string;
+    fills: TradeDetailFill[];
+  }>;
+  client: unknown;
+  provider: MarketDataProvider | null;
 };
 
 export async function getTradeCharts(input: GetTradeChartsInput): Promise<TradeCharts> {
@@ -145,6 +158,67 @@ export async function getTradeCharts(input: GetTradeChartsInput): Promise<TradeC
   return { charts, error: null };
 }
 
+export async function getTradeReviewGroupCharts(
+  input: GetTradeReviewGroupChartsInput,
+): Promise<TradeCharts> {
+  if (!input.provider) {
+    return { charts: [], error: "Massive API key is not configured." };
+  }
+
+  const requests: Array<{ id: string; label: string; request: MarketDataRequest }> = [
+    {
+      id: "daily",
+      label: "Daily",
+      request: rangeRequest({
+        symbol: input.symbol,
+        timeframe: "1d",
+        from: addDays(input.openedAt, -500),
+        to: addDays(input.closedAt, 120),
+      }),
+    },
+    {
+      id: "hourly",
+      label: "Hourly",
+      request: rangeRequest({
+        symbol: input.symbol,
+        timeframe: "1h",
+        from: addDays(input.openedAt, -2),
+        to: addDays(input.closedAt, 2),
+      }),
+    },
+  ];
+  const markers = campaignMarkersForTrades(input.trades);
+
+  const charts = await Promise.all(
+    requests.map(async ({ id, label, request }) => {
+      const bars = await getCachedOrFetchBars({
+        client: input.client,
+        provider: input.provider as MarketDataProvider,
+        request,
+      });
+      const visibleBars =
+        request.timeframe === "1d"
+          ? sliceToDateRange(bars, addDays(input.openedAt, -30), addDays(input.closedAt, 10))
+          : bars;
+      const overlays = overlaysForTimeframe(bars, request.timeframe);
+
+      return {
+        id,
+        label,
+        timeframe: request.timeframe,
+        bars: visibleBars,
+        overlays: filterOverlaysToBars(overlays, visibleBars, request.timeframe),
+        markers: markers.map((marker) => ({
+          ...marker,
+          time: fillTime(marker.time, request.timeframe),
+        })),
+      } satisfies TradeChartDataset;
+    }),
+  );
+
+  return { charts, error: null };
+}
+
 function rangeRequest(input: {
   symbol: string;
   timeframe: MarketDataTimeframe;
@@ -197,6 +271,34 @@ function markersForFills(
     role: fill.allocationRole,
     text: `${fill.allocationRole} ${formatQuantity(fill.allocatedQuantity)} @ ${formatPrice(fill.allocationPrice ?? fill.price)}`,
   }));
+}
+
+function campaignMarkersForTrades(
+  trades: GetTradeReviewGroupChartsInput["trades"],
+): TradeChartMarker[] {
+  return trades.flatMap((trade, tradeIndex) =>
+    [...trade.fills]
+      .sort((left, right) => left.executedAt.localeCompare(right.executedAt))
+      .map((fill) => ({
+        time: fill.executedAt,
+        price: fill.allocationPrice ?? fill.price ?? 0,
+        quantity: fill.allocatedQuantity,
+        side: fill.side,
+        role: fill.allocationRole,
+        text: `${fill.allocationRole} ${formatQuantity(fill.allocatedQuantity)} @ ${formatPrice(fill.allocationPrice ?? fill.price)}`,
+        label: `T${tradeIndex + 1} ${trade.direction.toUpperCase()} ${fill.allocationRole}`,
+      })),
+  );
+}
+
+function sliceToDateRange(bars: OhlcvBar[], from: string, to: string) {
+  const fromTime = Date.parse(`${datePart(from)}T00:00:00.000Z`);
+  const toTime = Date.parse(`${datePart(to)}T23:59:59.999Z`);
+
+  return bars.filter((bar) => {
+    const time = Date.parse(bar.barStartAt);
+    return time >= fromTime && time <= toTime;
+  });
 }
 
 function sliceAroundTrade(
