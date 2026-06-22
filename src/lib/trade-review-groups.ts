@@ -100,7 +100,7 @@ export function buildTradeHistoryItems(input: {
           trade !== undefined && trade.status === "CLOSED",
       );
 
-    if (activeMembers.length === 0) {
+    if (activeMembers.length < 2) {
       continue;
     }
 

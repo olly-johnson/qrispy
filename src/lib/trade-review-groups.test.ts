@@ -153,6 +153,22 @@ describe("buildTradeHistoryItems", () => {
     ).toEqual([{ kind: "trade", trade: openCarTrade }]);
   });
 
+  it("restores the remaining closed member when its paired membership now resolves as open", () => {
+    expect(
+      buildTradeHistoryItems({
+        trades: [carLong, openCarTrade],
+        groups: [group()],
+        members: [
+          { groupId: "group-1", reconstructionKey: carLong.reconstructionKey },
+          { groupId: "group-1", reconstructionKey: openCarTrade.reconstructionKey },
+        ],
+      }),
+    ).toEqual([
+      { kind: "trade", trade: openCarTrade },
+      { kind: "trade", trade: carLong },
+    ]);
+  });
+
   it("returns null numeric group totals only when every active member value is null", () => {
     const first = { ...carLong, realizedPnl: null, totalFees: null };
     const second = { ...carShort, realizedPnl: null, totalFees: 3 };

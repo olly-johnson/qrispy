@@ -733,6 +733,56 @@ describe("getTradeReviewGroupDetail", () => {
       getTradeReviewGroupDetail("user-1", "group-1", { client: { from } }),
     ).resolves.toBeNull();
   });
+
+  it("returns null when fewer than two group members remain closed", async () => {
+    const closedTrade = tradeHistoryRow({
+      id: "car-closed",
+      reconstructionKey: "car-closed-key",
+      symbol: "CAR",
+      direction: "LONG",
+      openedAt: "2026-06-02T14:30:00.000Z",
+      closedAt: "2026-06-03T14:30:00.000Z",
+      realizedPnl: -20,
+      totalFees: 2,
+    });
+    const openTrade = {
+      ...tradeHistoryRow({
+        id: "car-open",
+        reconstructionKey: "car-open-key",
+        symbol: "CAR",
+        direction: "SHORT",
+        openedAt: "2026-06-10T14:30:00.000Z",
+        closedAt: "2026-06-12T14:30:00.000Z",
+        realizedPnl: 0,
+        totalFees: 0,
+      }),
+      status: "OPEN",
+      closed_at: null,
+    };
+    const from = groupDetailClient({
+      group: {
+        id: "group-1",
+        custom_name: null,
+        symbol: "CAR",
+        created_at: "2026-06-16T12:00:00.000Z",
+        updated_at: "2026-06-16T12:00:00.000Z",
+      },
+      memberRows: [
+        { group_id: "group-1", reconstruction_key: "car-closed-key" },
+        { group_id: "group-1", reconstruction_key: "car-open-key" },
+      ],
+      tradeRows: [closedTrade, openTrade],
+      fillsByTradeId: {
+        "car-closed": [
+          allocatedFill("entry-closed", "ENTRY", "BUY", "2026-06-02T14:30:00.000Z"),
+        ],
+      },
+    });
+
+    await expect(
+      getTradeReviewGroupDetail("user-1", "group-1", { client: { from } }),
+    ).resolves.toBeNull();
+  });
 });
 
 function tradeHistoryRow(input: {
