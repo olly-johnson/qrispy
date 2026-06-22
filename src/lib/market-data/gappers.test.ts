@@ -48,6 +48,34 @@ describe("getExtendedHoursWindows", () => {
       },
     ]);
   });
+
+  it("skips every scheduled US equity market holiday when finding the previous close", async () => {
+    const cases = [
+      ["New Year's Day", "2026-01-02T13:00:00.000Z", "2025-12-31T21:00:00.000Z"],
+      ["Martin Luther King Jr. Day", "2026-01-20T13:00:00.000Z", "2026-01-16T21:00:00.000Z"],
+      ["Washington's Birthday", "2026-02-17T13:00:00.000Z", "2026-02-13T21:00:00.000Z"],
+      ["Good Friday", "2026-04-06T12:00:00.000Z", "2026-04-02T20:00:00.000Z"],
+      ["Memorial Day", "2026-05-26T12:00:00.000Z", "2026-05-22T20:00:00.000Z"],
+      ["Juneteenth", "2026-06-22T12:00:00.000Z", "2026-06-18T20:00:00.000Z"],
+      ["Independence Day", "2026-07-06T12:00:00.000Z", "2026-07-02T20:00:00.000Z"],
+      ["Labor Day", "2026-09-08T12:00:00.000Z", "2026-09-04T20:00:00.000Z"],
+      ["Thanksgiving Day", "2026-11-27T13:00:00.000Z", "2026-11-25T21:00:00.000Z"],
+      ["Christmas Day", "2026-12-28T13:00:00.000Z", "2026-12-24T21:00:00.000Z"],
+    ] as const;
+
+    for (const [holiday, now, previousCloseAt] of cases) {
+      const result = await buildGappersSnapshot({
+        now: new Date(now),
+        provider: providerWith({
+          aggregateBars: {},
+          snapshots: [snapshot("ACME", { price: 12, previousClose: 10, regularVolume: 20_000 })],
+          tickers: [ticker("ACME", "Acme Corp", "CS", "stocks")],
+        }),
+      });
+
+      expect(result.rows[0]?.previousCloseAt, holiday).toBe(previousCloseAt);
+    }
+  });
 });
 
 describe("buildGappersSnapshot", () => {
