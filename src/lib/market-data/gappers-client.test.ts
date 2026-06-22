@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 
 import {
   buildGappersSummaryRequests,
+  clearGappersNewsSummaryCache,
   getCachedGappersSummaryResults,
   getLastGappersSummaryResults,
   DEFAULT_GAPPERS_FILTERS,
@@ -101,6 +102,55 @@ describe("gappers search params", () => {
 });
 
 describe("gapper summary cache", () => {
+  it("clears saved summaries and the last displayed results without affecting other storage", () => {
+    const storage = new MemoryStorage();
+    const requests = [
+      {
+        previousCloseAt: "2026-06-18T20:00:00.000Z",
+        symbol: "STI",
+      },
+    ];
+    const results = [
+      {
+        message: "No Massive news found after previous close.",
+        status: "no_news" as const,
+        symbol: "STI",
+      },
+    ];
+
+    saveGappersSummaryResults({
+      model: "gpt-4o-mini",
+      now: 1_000,
+      provider: "openai",
+      requests,
+      results,
+      storage,
+    });
+    saveLastGappersSummaryResults({ now: 1_000, results, storage });
+    storage.setItem("qrispy:unrelated", "keep");
+
+    clearGappersNewsSummaryCache({ storage });
+
+    expect(
+      getCachedGappersSummaryResults({
+        maxAgeMs: 60_000,
+        model: "gpt-4o-mini",
+        now: 2_000,
+        provider: "openai",
+        requests,
+        storage,
+      }),
+    ).toEqual({ cachedResults: [], missingRequests: requests });
+    expect(
+      getLastGappersSummaryResults({
+        maxAgeMs: 60_000,
+        now: 2_000,
+        storage,
+      }),
+    ).toEqual([]);
+    expect(storage.getItem("qrispy:unrelated")).toBe("keep");
+  });
+
   it("restores fresh summary results for matching request/provider/model", () => {
     const storage = new MemoryStorage();
     const requests = [
@@ -388,8 +438,20 @@ function row(
 class MemoryStorage {
   private readonly values = new Map<string, string>();
 
+  get length() {
+    return this.values.size;
+  }
+
   getItem(key: string) {
     return this.values.get(key) ?? null;
+  }
+
+  key(index: number) {
+    return [...this.values.keys()][index] ?? null;
+  }
+
+  removeItem(key: string) {
+    this.values.delete(key);
   }
 
   setItem(key: string, value: string) {

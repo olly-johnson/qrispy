@@ -1,6 +1,6 @@
 "use client";
 
-import { RefreshCw, Sparkles } from "lucide-react";
+import { RefreshCw, Sparkles, Trash2 } from "lucide-react";
 import { usePathname, useRouter } from "next/navigation";
 import { useEffect, useMemo, useState, useTransition } from "react";
 
@@ -8,6 +8,7 @@ import { formatDateTime, formatPercent } from "@/components/format";
 import type { GappersMode, GappersRow } from "@/lib/market-data/gappers";
 import {
   buildGappersSummaryRequests,
+  clearGappersNewsSummaryCache,
   filterGappersRows,
   getCachedGappersSummaryResults,
   getLastGappersSummaryResults,
@@ -196,6 +197,12 @@ export function GappersTable({
     }
   };
 
+  const clearCachedNews = () => {
+    clearGappersNewsSummaryCache({ storage: window.localStorage });
+    setSummaryError(null);
+    setSummaryResults([]);
+  };
+
   return (
     <div>
       <div className="flex flex-wrap items-start justify-between gap-4">
@@ -264,7 +271,7 @@ export function GappersTable({
       </section>
 
       <section className="mt-4 rounded-md border border-white/10 bg-white/[0.04] p-4">
-        <div className="grid gap-3 md:grid-cols-[1fr_1fr_auto]">
+        <div className="grid gap-3 md:grid-cols-[1fr_1fr_auto_auto]">
           <label className="grid gap-1 text-xs text-zinc-500">
             LLM provider
             <select
@@ -299,6 +306,15 @@ export function GappersTable({
           >
             <Sparkles className={`h-4 w-4 ${isSummarizing ? "animate-pulse" : ""}`} />
             Summarise selected
+          </button>
+          <button
+            className="inline-flex h-10 items-center justify-center gap-2 self-end rounded-md border border-white/10 bg-white/[0.04] px-4 text-sm font-semibold text-zinc-200 transition hover:bg-white/[0.08] disabled:cursor-not-allowed disabled:opacity-60"
+            disabled={isSummarizing}
+            onClick={clearCachedNews}
+            type="button"
+          >
+            <Trash2 className="h-4 w-4" />
+            Clear cached news
           </button>
         </div>
         <div className="mt-4 text-sm text-zinc-500">
