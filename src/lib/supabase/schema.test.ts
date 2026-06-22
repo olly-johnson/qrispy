@@ -277,7 +277,9 @@ describe("Trade review groups migration", () => {
       /create table public\.trade_review_group_members \((.*?)\);/,
     )?.[1];
 
-    expect(groupTable).toContain("id uuid primary key");
+    expect(groupTable).toContain(
+      "id uuid primary key default gen_random_uuid()",
+    );
     expect(groupTable).toContain(
       "user_id uuid not null references auth.users(id) on delete cascade",
     );
