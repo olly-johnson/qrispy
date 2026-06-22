@@ -95,7 +95,10 @@ export function buildTradeHistoryItems(input: {
     const activeMembers = input.members
       .filter((member) => member.groupId === group.id)
       .map((member) => tradesByReconstructionKey.get(member.reconstructionKey))
-      .filter((trade): trade is ReviewableTrade => Boolean(trade));
+      .filter(
+        (trade): trade is ReviewableTrade =>
+          trade !== undefined && trade.status === "CLOSED",
+      );
 
     if (activeMembers.length === 0) {
       continue;

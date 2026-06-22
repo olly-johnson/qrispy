@@ -141,6 +141,18 @@ describe("buildTradeHistoryItems", () => {
     ]);
   });
 
+  it("leaves a formerly grouped trade visible when it now resolves as open", () => {
+    expect(
+      buildTradeHistoryItems({
+        trades: [openCarTrade],
+        groups: [group()],
+        members: [
+          { groupId: "group-1", reconstructionKey: openCarTrade.reconstructionKey },
+        ],
+      }),
+    ).toEqual([{ kind: "trade", trade: openCarTrade }]);
+  });
+
   it("returns null numeric group totals only when every active member value is null", () => {
     const first = { ...carLong, realizedPnl: null, totalFees: null };
     const second = { ...carShort, realizedPnl: null, totalFees: 3 };
