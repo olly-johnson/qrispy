@@ -280,6 +280,7 @@ describe("Trade review groups migration", () => {
     expect(groupTable).toContain(
       "id uuid primary key default gen_random_uuid()",
     );
+    expect(groupTable).toContain("unique (id, user_id)");
     expect(groupTable).toContain(
       "user_id uuid not null references auth.users(id) on delete cascade",
     );
@@ -289,9 +290,7 @@ describe("Trade review groups migration", () => {
     expect(groupTable).toContain("updated_at timestamptz not null default now()");
     expect(groupTable).not.toMatch(/\bdirection\b/);
 
-    expect(memberTable).toContain(
-      "group_id uuid not null references public.trade_review_groups(id) on delete cascade",
-    );
+    expect(memberTable).toContain("group_id uuid not null");
     expect(memberTable).toContain(
       "user_id uuid not null references auth.users(id) on delete cascade",
     );
@@ -299,13 +298,10 @@ describe("Trade review groups migration", () => {
     expect(memberTable).toContain("created_at timestamptz not null default now()");
     expect(memberTable).toContain("primary key (group_id, reconstruction_key)");
     expect(memberTable).toContain("unique (user_id, reconstruction_key)");
-
-    expect(normalizedSql).toContain(
-      "trade_review_group_members_group_id_idx",
+    expect(memberTable).toContain(
+      "foreign key (group_id, user_id) references public.trade_review_groups(id, user_id) on delete cascade",
     );
-    expect(normalizedSql).toContain(
-      "trade_review_group_members_user_reconstruction_key_idx",
-    );
+    expect(normalizedSql).not.toContain("create index trade_review_group_members");
 
     for (const table of [
       "trade_review_groups",
@@ -318,14 +314,19 @@ describe("Trade review groups migration", () => {
         `grant select, insert, update, delete on table public.${table} to authenticated, service_role`,
       );
 
-      for (const action of ["select", "insert", "update", "delete"]) {
+      const ownerPolicyClauses = {
+        select: "using ((select auth.uid()) = user_id)",
+        insert: "with check ((select auth.uid()) = user_id)",
+        update:
+          "using ((select auth.uid()) = user_id) with check ((select auth.uid()) = user_id)",
+        delete: "using ((select auth.uid()) = user_id)",
+      };
+
+      for (const [action, clause] of Object.entries(ownerPolicyClauses)) {
         expect(normalizedSql).toContain(
-          `owner can ${action} ${table.replaceAll("_", " ")}`,
+          `create policy "owner can ${action} ${table.replaceAll("_", " ")}" on public.${table} for ${action} to authenticated ${clause};`,
         );
       }
     }
-
-    expect(normalizedSql).toContain("using ((select auth.uid()) = user_id)");
-    expect(normalizedSql).toContain("with check ((select auth.uid()) = user_id)");
   });
 });

@@ -4,23 +4,20 @@ create table public.trade_review_groups (
   custom_name text,
   symbol text not null,
   created_at timestamptz not null default now(),
-  updated_at timestamptz not null default now()
+  updated_at timestamptz not null default now(),
+  unique (id, user_id)
 );
 
 create table public.trade_review_group_members (
-  group_id uuid not null references public.trade_review_groups(id) on delete cascade,
+  group_id uuid not null,
   user_id uuid not null references auth.users(id) on delete cascade,
   reconstruction_key text not null,
   created_at timestamptz not null default now(),
   primary key (group_id, reconstruction_key),
-  unique (user_id, reconstruction_key)
+  unique (user_id, reconstruction_key),
+  foreign key (group_id, user_id)
+    references public.trade_review_groups(id, user_id) on delete cascade
 );
-
-create index trade_review_group_members_group_id_idx
-  on public.trade_review_group_members (group_id);
-
-create index trade_review_group_members_user_reconstruction_key_idx
-  on public.trade_review_group_members (user_id, reconstruction_key);
 
 alter table public.trade_review_groups enable row level security;
 alter table public.trade_review_group_members enable row level security;
