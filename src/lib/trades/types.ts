@@ -19,7 +19,8 @@ export type TradeGrade = (typeof TRADE_GRADES)[number];
 export type TradeReview = {
   id: string;
   userId: string;
-  tradeId: string;
+  tradeId: string | null;
+  groupId: string | null;
   setupType: TradeSetupType | null;
   grade: TradeGrade | null;
   summary: string | null;

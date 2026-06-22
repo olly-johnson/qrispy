@@ -6,8 +6,9 @@ import {
 } from "@/lib/trades/types";
 
 export type TradeReviewInput = {
-  tradeId: string;
   userId: string;
+  tradeId?: string | null;
+  groupId?: string | null;
   setupType?: string | null;
   grade?: string | null;
   summary?: string | null;
@@ -17,7 +18,8 @@ export type TradeReviewInput = {
 };
 
 export type TradeReviewRow = {
-  trade_id: string;
+  trade_id: string | null;
+  group_id: string | null;
   user_id: string;
   setup_type: TradeSetupType | null;
   grade: TradeGrade | null;
@@ -48,11 +50,17 @@ function normalizeEnum<T extends string>(
 }
 
 export function buildTradeReviewRow(input: TradeReviewInput): TradeReviewRow {
-  if (!input.tradeId) throw new Error("tradeId is required.");
   if (!input.userId) throw new Error("userId is required.");
 
+  const hasTrade = Boolean(input.tradeId);
+  const hasGroup = Boolean(input.groupId);
+  if (hasTrade === hasGroup) {
+    throw new Error("Provide exactly one of tradeId or groupId.");
+  }
+
   return {
-    trade_id: input.tradeId,
+    trade_id: input.tradeId ?? null,
+    group_id: input.groupId ?? null,
     user_id: input.userId,
     setup_type: normalizeEnum(input.setupType, TRADE_SETUP_TYPES, "setup_type"),
     grade: normalizeEnum(input.grade, TRADE_GRADES, "grade"),

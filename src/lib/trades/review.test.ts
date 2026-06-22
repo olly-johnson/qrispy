@@ -3,7 +3,7 @@ import { buildTradeReviewRow } from "@/lib/trades/review";
 describe("buildTradeReviewRow", () => {
   const base = { tradeId: "t1", userId: "u1" };
 
-  it("maps a full review to a snake_case row", () => {
+  it("maps a full trade review to a snake_case row", () => {
     expect(
       buildTradeReviewRow({
         ...base,
@@ -16,6 +16,7 @@ describe("buildTradeReviewRow", () => {
       }),
     ).toEqual({
       trade_id: "t1",
+      group_id: null,
       user_id: "u1",
       setup_type: "parabolic_short",
       grade: "F",
@@ -24,6 +25,13 @@ describe("buildTradeReviewRow", () => {
       what_went_wrong: "Shorted before the dot; held overnight.",
       lessons_learned: "Only short on a dot day or the day after.",
     });
+  });
+
+  it("attaches to a group when given groupId", () => {
+    const row = buildTradeReviewRow({ userId: "u1", groupId: "g1", grade: "F" });
+    expect(row.group_id).toBe("g1");
+    expect(row.trade_id).toBeNull();
+    expect(row.grade).toBe("F");
   });
 
   it("trims text and turns blanks into null", () => {
@@ -48,8 +56,14 @@ describe("buildTradeReviewRow", () => {
     ).toThrow(/Invalid setup_type/);
   });
 
-  it("requires tradeId and userId", () => {
-    expect(() => buildTradeReviewRow({ tradeId: "", userId: "u1" })).toThrow(/tradeId/);
+  it("requires userId", () => {
     expect(() => buildTradeReviewRow({ tradeId: "t1", userId: "" })).toThrow(/userId/);
+  });
+
+  it("requires exactly one of tradeId or groupId", () => {
+    expect(() => buildTradeReviewRow({ userId: "u1" })).toThrow(/exactly one/);
+    expect(() =>
+      buildTradeReviewRow({ userId: "u1", tradeId: "t1", groupId: "g1" }),
+    ).toThrow(/exactly one/);
   });
 });
