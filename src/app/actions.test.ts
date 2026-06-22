@@ -9,9 +9,11 @@ import {
   getLatestSuccessfulTradeZeroSyncToDate,
   recordTradeZeroSyncQueued,
 } from "@/lib/sync/job-runs";
+import { getTradeReviewMemberCharts } from "@/lib/app-data";
 import {
   createTradeReviewGroup,
   deleteTradeReviewGroup,
+  loadTradeReviewMemberCharts,
   removeTradeReviewGroupMember,
   renameTradeReviewGroup,
   requestTradeZeroSync,
@@ -42,6 +44,10 @@ vi.mock("@/lib/sync/job-runs", () => ({
   getLatestSuccessfulTradeZeroSyncToDate: vi.fn(),
   recordTradeZeroSyncQueued: vi.fn(),
   recordTradeZeroSyncFailed: vi.fn(),
+}));
+
+vi.mock("@/lib/app-data", () => ({
+  getTradeReviewMemberCharts: vi.fn(),
 }));
 
 describe("requestTradeZeroSync", () => {
@@ -151,6 +157,16 @@ describe("updateTradeStopLoss", () => {
 });
 
 describe("trade review group actions", () => {
+  it("loads charts only for the authenticated user's requested review member", async () => {
+    vi.mocked(requireUser).mockResolvedValue({ id: "user-1", email: "test@example.com" });
+    const charts = { charts: [], error: null };
+    vi.mocked(getTradeReviewMemberCharts).mockResolvedValue(charts);
+
+    await expect(loadTradeReviewMemberCharts("group-1", "car-short")).resolves.toBe(charts);
+
+    expect(getTradeReviewMemberCharts).toHaveBeenCalledWith("user-1", "group-1", "car-short");
+  });
+
   it("creates an authenticated same-symbol group with mixed directions", async () => {
     vi.mocked(requireUser).mockResolvedValue({ id: "user-1", email: "test@example.com" });
     const { from, calls } = reviewGroupClient({

@@ -262,6 +262,35 @@ type TradeReviewGroupDetailClient = TradeFillClient & {
   };
 };
 
+type TradeReviewMemberChartLookupClient = {
+  from(table: "trade_review_group_members"): {
+    select(columns: "reconstruction_key"): {
+      eq(column: "user_id", value: string): {
+        eq(column: "group_id", value: string): {
+          eq(column: "reconstruction_key", value: string): {
+            maybeSingle(): Promise<{
+              data: Record<string, unknown> | null;
+              error: unknown;
+            }>;
+          };
+        };
+      };
+    };
+  };
+  from(table: "trades"): {
+    select(columns: "id"): {
+      eq(column: "user_id", value: string): {
+        eq(column: "reconstruction_key", value: string): {
+          maybeSingle(): Promise<{
+            data: Record<string, unknown> | null;
+            error: unknown;
+          }>;
+        };
+      };
+    };
+  };
+};
+
 type OpenTradeStopRow = OpenTradeStopInput & {
   stopGroupId?: string;
   tradeId: string;
@@ -530,6 +559,65 @@ export async function getTradeDetail(
   }
 
   return trade;
+}
+
+export async function getTradeReviewMemberCharts(
+  userId: string,
+  groupId: string,
+  reconstructionKey: string,
+  options: {
+    client?: unknown;
+    marketDataClient?: unknown;
+    marketDataProvider?: MarketDataProvider | null;
+    now?: Date;
+  } = {},
+): Promise<TradeCharts> {
+  const supabase =
+    (options.client as TradeReviewMemberChartLookupClient | undefined) ??
+    ((await createSupabaseServerClient()) as unknown as TradeReviewMemberChartLookupClient | null);
+
+  if (!supabase) {
+    throw new Error("Supabase is not configured");
+  }
+
+  const memberResult = await supabase
+    .from("trade_review_group_members")
+    .select("reconstruction_key")
+    .eq("user_id", userId)
+    .eq("group_id", groupId)
+    .eq("reconstruction_key", reconstructionKey)
+    .maybeSingle();
+  if (memberResult.error) {
+    throw memberResult.error;
+  }
+  if (!memberResult.data) {
+    throw new Error("Trade review group member not found.");
+  }
+
+  const tradeResult = await supabase
+    .from("trades")
+    .select("id")
+    .eq("user_id", userId)
+    .eq("reconstruction_key", reconstructionKey)
+    .maybeSingle();
+  if (tradeResult.error) {
+    throw tradeResult.error;
+  }
+  if (!tradeResult.data?.id) {
+    throw new Error("Trade review group member not found.");
+  }
+
+  const trade = await getTradeDetail(userId, String(tradeResult.data.id), {
+    client: supabase as unknown as TradeDetailClient,
+    marketDataClient: options.marketDataClient,
+    marketDataProvider: options.marketDataProvider,
+    now: options.now,
+  });
+  if (!trade) {
+    throw new Error("Trade review group member not found.");
+  }
+
+  return trade.charts ?? { charts: [], error: "Market data unavailable." };
 }
 
 export async function getTradeReviewGroupDetail(

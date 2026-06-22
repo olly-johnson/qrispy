@@ -4,6 +4,7 @@ import { revalidatePath } from "next/cache";
 
 import { inngest } from "@/inngest/client";
 import { requireUser } from "@/lib/auth/session";
+import { getTradeReviewMemberCharts } from "@/lib/app-data";
 import { createSupabaseServerClient } from "@/lib/supabase/server";
 import { buildTradeZeroSyncEvent } from "@/lib/sync/events";
 import {
@@ -225,6 +226,12 @@ export async function deleteTradeReviewGroup(groupId: string): Promise<void> {
   if (error) throw error;
 
   revalidateReviewGroupPaths(groupId);
+}
+
+export async function loadTradeReviewMemberCharts(groupId: string, reconstructionKey: string) {
+  const user = await requireUser();
+
+  return getTradeReviewMemberCharts(user.id, groupId, reconstructionKey);
 }
 
 function revalidateReviewGroupPaths(groupId: string) {

@@ -6,6 +6,7 @@ import {
   getTradeDetail,
   getTradeHistory,
   getTradeReviewGroupDetail,
+  getTradeReviewMemberCharts,
   loadStopGroupRows,
   mapLatestPositions,
 } from "@/lib/app-data";
@@ -819,6 +820,41 @@ describe("getTradeReviewGroupDetail", () => {
   });
 });
 
+describe("getTradeReviewMemberCharts", () => {
+  it("loads the original trade charts after verifying the owner and member key", async () => {
+    const { from, calls } = reviewMemberChartClient({
+      membership: { reconstruction_key: "car-short" },
+      trade: { id: "trade-1" },
+    });
+
+    await expect(
+      getTradeReviewMemberCharts("user-1", "group-1", "car-short", {
+        client: { from },
+        marketDataClient: { from: vi.fn() },
+        marketDataProvider: null,
+      }),
+    ).resolves.toEqual({ charts: [], error: "Market data unavailable." });
+
+    expect(calls.membershipUserId).toHaveBeenCalledWith("user_id", "user-1");
+    expect(calls.membershipGroupId).toHaveBeenCalledWith("group_id", "group-1");
+    expect(calls.membershipKey).toHaveBeenCalledWith("reconstruction_key", "car-short");
+    expect(calls.tradeUserId).toHaveBeenCalledWith("user_id", "user-1");
+    expect(calls.tradeKey).toHaveBeenCalledWith("reconstruction_key", "car-short");
+  });
+
+  it.each([
+    ["missing", null, { id: "trade-1" }],
+    ["foreign or non-member", null, { id: "trade-1" }],
+    ["stale", { reconstruction_key: "car-short" }, null],
+  ])("rejects a %s review member request", async (_reason, membership, trade) => {
+    const { from } = reviewMemberChartClient({ membership, trade });
+
+    await expect(
+      getTradeReviewMemberCharts("user-1", "group-1", "car-short", { client: { from } }),
+    ).rejects.toThrow("Trade review group member not found.");
+  });
+});
+
 function tradeHistoryRow(input: {
   id: string;
   reconstructionKey: string;
@@ -1484,4 +1520,91 @@ function detailStoredFill(input: {
     sec_fee: input.fees,
     raw_payload: {},
   };
+}
+
+function reviewMemberChartClient(input: {
+  membership: Record<string, unknown> | null;
+  trade: Record<string, unknown> | null;
+}) {
+  const calls = {
+    membershipUserId: vi.fn(),
+    membershipGroupId: vi.fn(),
+    membershipKey: vi.fn(),
+    tradeUserId: vi.fn(),
+    tradeKey: vi.fn(),
+  };
+  const membershipMaybeSingle = vi.fn().mockResolvedValue({ data: input.membership, error: null });
+  calls.membershipKey.mockImplementation(() => ({ maybeSingle: membershipMaybeSingle }));
+  calls.membershipGroupId.mockImplementation(() => ({ eq: calls.membershipKey }));
+  calls.membershipUserId.mockImplementation(() => ({ eq: calls.membershipGroupId }));
+
+  const keyedTradeMaybeSingle = vi.fn().mockResolvedValue({ data: input.trade, error: null });
+  const detailTradeMaybeSingle = vi.fn().mockResolvedValue({
+    data: input.trade
+      ? {
+          id: "trade-1",
+          account_id: "account-1",
+          reconstruction_key: "car-short",
+          symbol: "CAR",
+          direction: "SHORT",
+          status: "CLOSED",
+          opened_at: "2026-06-02T14:30:00.000Z",
+          closed_at: "2026-06-02T18:00:00.000Z",
+          entry_quantity: 100,
+          max_abs_quantity: 100,
+          avg_entry_price: 10,
+          avg_exit_price: 11,
+          realized_pnl: -100,
+          total_fees: 2,
+        }
+      : null,
+    error: null,
+  });
+  const tradeSecondEq = vi.fn((column: string) =>
+    column === "reconstruction_key"
+      ? { maybeSingle: keyedTradeMaybeSingle }
+      : { maybeSingle: detailTradeMaybeSingle },
+  );
+  calls.tradeKey.mockImplementation((column: string, value: string) => tradeSecondEq(column, value));
+  const tradeFirstEq = vi.fn((column: string, value: string) => {
+    calls.tradeUserId(column, value);
+    return { eq: calls.tradeKey };
+  });
+
+  const fillsOrder = vi.fn().mockResolvedValue({ data: [], error: null });
+  const fillsTradeId = vi.fn(() => ({ order: fillsOrder }));
+  const fillsUserId = vi.fn(() => ({ eq: fillsTradeId }));
+  const stopOrder = vi.fn().mockResolvedValue({ data: [], error: null });
+  const stopIn = vi.fn(() => ({ order: stopOrder }));
+  const stopUserId = vi.fn(() => ({ in: stopIn }));
+  const rawFillsOrder = vi.fn().mockResolvedValue({ data: [], error: null });
+  const rawFillsQuery = {
+    eq: vi.fn(),
+    gte: vi.fn(),
+    lte: vi.fn(),
+    order: rawFillsOrder,
+  };
+  rawFillsQuery.eq.mockReturnValue(rawFillsQuery);
+  rawFillsQuery.gte.mockReturnValue(rawFillsQuery);
+  rawFillsQuery.lte.mockReturnValue(rawFillsQuery);
+  const from = vi.fn((table: string) => {
+    if (table === "trade_review_group_members") {
+      return { select: vi.fn(() => ({ eq: calls.membershipUserId })) };
+    }
+    if (table === "trades") {
+      return { select: vi.fn(() => ({ eq: tradeFirstEq })) };
+    }
+    if (table === "trade_fills") {
+      return { select: vi.fn(() => ({ eq: fillsUserId })) };
+    }
+    if (table === "trade_stop_groups") {
+      return { select: vi.fn(() => ({ eq: stopUserId })) };
+    }
+    if (table === "fills") {
+      return { select: vi.fn(() => rawFillsQuery) };
+    }
+    throw new Error(`Unexpected table ${table}`);
+  });
+
+  return { from, calls };
 }
