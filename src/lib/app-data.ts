@@ -6,6 +6,13 @@ import { createSupabaseAdminClient } from "@/lib/supabase/server";
 import { createMassiveMarketDataProvider } from "@/lib/market-data/massive";
 import { getTradeCharts, type TradeCharts } from "@/lib/market-data/trade-charts";
 import type { MarketDataProvider } from "@/lib/market-data/types";
+import {
+  buildTradeHistoryItems,
+  type ReviewableTrade,
+  type TradeHistoryItem,
+  type TradeReviewGroupMemberSource,
+  type TradeReviewGroupSource,
+} from "@/lib/trade-review-groups";
 import { reconstructTrades } from "@/lib/trades/reconstruct";
 import type { CanonicalFill } from "@/lib/trades/types";
 
@@ -68,6 +75,22 @@ export type TradeDetail = DashboardTrade & {
   charts?: TradeCharts;
 };
 
+export type TradeReviewGroupDetail = {
+  id: string;
+  customName: string | null;
+  symbol: string;
+  createdAt: string;
+  updatedAt: string;
+  label: string;
+  openedAt: string;
+  closedAt: string;
+  tradeCount: number;
+  realizedPnl: number | null;
+  totalFees: number | null;
+  timeline: Array<ReviewableTrade & { fills: TradeDetailFill[] }>;
+  charts?: TradeCharts;
+};
+
 export type JobRun = {
   id: string;
   status: string;
@@ -93,21 +116,35 @@ type TradeHistoryClient = {
       };
     };
   };
-};
-
-type TradeDetailClient = {
-  from(table: "trades"): {
+  from(table: "trade_review_groups"): {
     select(columns: "*"): {
       eq(column: "user_id", value: string): {
-        eq(column: "id", value: string): {
-          maybeSingle(): Promise<{
-            data: Record<string, unknown> | null;
-            error: unknown;
-          }>;
-        };
+        order(
+          column: "created_at",
+          options: { ascending: boolean },
+        ): Promise<{
+          data: Record<string, unknown>[] | null;
+          error: unknown;
+        }>;
       };
     };
   };
+  from(table: "trade_review_group_members"): {
+    select(columns: "*"): {
+      eq(column: "user_id", value: string): {
+        order(
+          column: "created_at",
+          options: { ascending: boolean },
+        ): Promise<{
+          data: Record<string, unknown>[] | null;
+          error: unknown;
+        }>;
+      };
+    };
+  };
+};
+
+type TradeFillClient = {
   from(table: "trade_fills"): {
     select(columns: string): {
       eq(column: "user_id", value: string): {
@@ -144,12 +181,72 @@ type TradeDetailClient = {
       };
     };
   };
+};
+
+type TradeDetailClient = TradeFillClient & {
+  from(table: "trades"): {
+    select(columns: "*"): {
+      eq(column: "user_id", value: string): {
+        eq(column: "id", value: string): {
+          maybeSingle(): Promise<{
+            data: Record<string, unknown> | null;
+            error: unknown;
+          }>;
+        };
+      };
+    };
+  };
   from(table: "trade_stop_groups"): {
     select(columns: "*"): {
       eq(column: "user_id", value: string): {
         in(column: "trade_id", values: string[]): {
           order(
             column: "entry_date",
+            options: { ascending: boolean },
+          ): Promise<{
+            data: Record<string, unknown>[] | null;
+            error: unknown;
+          }>;
+        };
+      };
+    };
+  };
+};
+
+type TradeReviewGroupDetailClient = TradeFillClient & {
+  from(table: "trade_review_groups"): {
+    select(columns: "*"): {
+      eq(column: "user_id", value: string): {
+        eq(column: "id", value: string): {
+          maybeSingle(): Promise<{
+            data: Record<string, unknown> | null;
+            error: unknown;
+          }>;
+        };
+      };
+    };
+  };
+  from(table: "trade_review_group_members"): {
+    select(columns: "*"): {
+      eq(column: "user_id", value: string): {
+        eq(column: "group_id", value: string): {
+          order(
+            column: "created_at",
+            options: { ascending: boolean },
+          ): Promise<{
+            data: Record<string, unknown>[] | null;
+            error: unknown;
+          }>;
+        };
+      };
+    };
+  };
+  from(table: "trades"): {
+    select(columns: "*"): {
+      eq(column: "user_id", value: string): {
+        in(column: "reconstruction_key", values: string[]): {
+          order(
+            column: "opened_at",
             options: { ascending: boolean },
           ): Promise<{
             data: Record<string, unknown>[] | null;
@@ -298,27 +395,47 @@ export async function getDashboardData(userId: string) {
 export async function getTradeHistory(
   userId: string,
   options: { client?: unknown; now?: Date } = {},
-) {
+): Promise<TradeHistoryItem[]> {
   const supabase =
     (options.client as TradeHistoryClient | undefined) ??
     ((await createSupabaseServerClient()) as TradeHistoryClient | null);
 
   if (!supabase) {
-    return [] as DashboardTrade[];
+    return [];
   }
 
-  const { data, error } = await supabase
-    .from("trades")
-    .select("*")
-    .eq("user_id", userId)
-    .lt("opened_at", tomorrowUtc(options.now ?? new Date()))
-    .order("opened_at", { ascending: false });
+  const [tradesResult, groupsResult, membersResult] = await Promise.all([
+    supabase
+      .from("trades")
+      .select("*")
+      .eq("user_id", userId)
+      .lt("opened_at", tomorrowUtc(options.now ?? new Date()))
+      .order("opened_at", { ascending: false }),
+    supabase
+      .from("trade_review_groups")
+      .select("*")
+      .eq("user_id", userId)
+      .order("created_at", { ascending: false }),
+    supabase
+      .from("trade_review_group_members")
+      .select("*")
+      .eq("user_id", userId)
+      .order("created_at", { ascending: false }),
+  ]);
 
-  if (error) {
-    throw error;
+  for (const result of [tradesResult, groupsResult, membersResult]) {
+    if (result.error) {
+      throw result.error;
+    }
   }
 
-  return (data ?? []).filter(overlapsTradeHistoryWindow).map(mapTrade);
+  return buildTradeHistoryItems({
+    trades: (tradesResult.data ?? [])
+      .filter(overlapsTradeHistoryWindow)
+      .map(mapReviewableTrade),
+    groups: (groupsResult.data ?? []).map(mapTradeReviewGroup),
+    members: (membersResult.data ?? []).map(mapTradeReviewGroupMember),
+  });
 }
 
 export async function getTradeDetail(
@@ -354,29 +471,12 @@ export async function getTradeDetail(
     return null;
   }
 
-  const fillsResult = await supabase
-    .from("trade_fills")
-    .select(
-      "allocated_quantity,allocation_role,allocation_price,fills(id,source_fill_id,side,quantity,price,executed_at,commission,sec_fee,taf_fee,nscc_fee,nasdaq_fee,ecn_remove_fee,ecn_add_rebate,raw_payload)",
-    )
-    .eq("user_id", userId)
-    .eq("trade_id", tradeId)
-    .order("allocation_role", { ascending: true });
-
-  if (fillsResult.error) {
-    throw fillsResult.error;
-  }
-
-  let fills = (fillsResult.data ?? []).map(mapTradeDetailFill).sort(compareDetailFills);
-
-  if (fills.length === 0) {
-    fills = await reconstructTradeDetailFills({
-      client: supabase,
-      trade: data,
-      now: options.now ?? new Date(),
-      userId,
-    });
-  }
+  const fills = await loadTradeDetailFills({
+    client: supabase,
+    now: options.now ?? new Date(),
+    trade: data,
+    userId,
+  });
 
   const stopGroups =
     String(data.status) === "OPEN"
@@ -428,8 +528,129 @@ export async function getTradeDetail(
   return trade;
 }
 
+export async function getTradeReviewGroupDetail(
+  userId: string,
+  groupId: string,
+  options: { client?: unknown; now?: Date } = {},
+): Promise<TradeReviewGroupDetail | null> {
+  const supabase =
+    (options.client as TradeReviewGroupDetailClient | undefined) ??
+    ((await createSupabaseServerClient()) as TradeReviewGroupDetailClient | null);
+
+  if (!supabase) {
+    return null;
+  }
+
+  const groupResult = await supabase
+    .from("trade_review_groups")
+    .select("*")
+    .eq("user_id", userId)
+    .eq("id", groupId)
+    .maybeSingle();
+
+  if (groupResult.error) {
+    throw groupResult.error;
+  }
+  if (!groupResult.data) {
+    return null;
+  }
+
+  const membersResult = await supabase
+    .from("trade_review_group_members")
+    .select("*")
+    .eq("user_id", userId)
+    .eq("group_id", groupId)
+    .order("created_at", { ascending: true });
+
+  if (membersResult.error) {
+    throw membersResult.error;
+  }
+
+  const members = (membersResult.data ?? []).map(mapTradeReviewGroupMember);
+  if (members.length === 0) {
+    return null;
+  }
+
+  const tradesResult = await supabase
+    .from("trades")
+    .select("*")
+    .eq("user_id", userId)
+    .in(
+      "reconstruction_key",
+      members.map((member) => member.reconstructionKey),
+    )
+    .order("opened_at", { ascending: true });
+
+  if (tradesResult.error) {
+    throw tradesResult.error;
+  }
+
+  const timelineRows = (tradesResult.data ?? []).filter(
+    (row) => String(row.status) === "CLOSED",
+  );
+  if (timelineRows.length === 0) {
+    return null;
+  }
+
+  const timeline = await Promise.all(
+    timelineRows.map(async (row) => ({
+      ...mapReviewableTrade(row),
+      fills: await loadTradeDetailFills({
+        client: supabase,
+        now: options.now ?? new Date(),
+        trade: row,
+        userId,
+      }),
+    })),
+  );
+  timeline.sort((left, right) => left.openedAt.localeCompare(right.openedAt));
+
+  const group = mapTradeReviewGroup(groupResult.data);
+  const groupItem = buildTradeHistoryItems({
+    trades: timeline,
+    groups: [group],
+    members,
+  }).find((item) => item.kind === "group" && item.group.id === groupId);
+
+  if (!groupItem || groupItem.kind !== "group") {
+    return null;
+  }
+
+  return {
+    ...groupItem.group,
+    timeline,
+  };
+}
+
+async function loadTradeDetailFills(input: {
+  client: TradeFillClient;
+  trade: Record<string, unknown>;
+  now: Date;
+  userId: string;
+}) {
+  const fillsResult = await input.client
+    .from("trade_fills")
+    .select(
+      "allocated_quantity,allocation_role,allocation_price,fills(id,source_fill_id,side,quantity,price,executed_at,commission,sec_fee,taf_fee,nscc_fee,nasdaq_fee,ecn_remove_fee,ecn_add_rebate,raw_payload)",
+    )
+    .eq("user_id", input.userId)
+    .eq("trade_id", String(input.trade.id))
+    .order("allocation_role", { ascending: true });
+
+  if (fillsResult.error) {
+    throw fillsResult.error;
+  }
+
+  const fills = (fillsResult.data ?? []).map(mapTradeDetailFill).sort(compareDetailFills);
+  if (fills.length > 0) {
+    return fills;
+  }
+
+  return reconstructTradeDetailFills(input);
+}
+
 async function reconstructTradeDetailFills(input: {
-  client: TradeDetailClient;
+  client: TradeFillClient;
   trade: Record<string, unknown>;
   now: Date;
   userId: string;
@@ -731,6 +952,34 @@ function mapTrade(row: Record<string, unknown>): DashboardTrade {
     avgExitPrice: numberOrNull(row.avg_exit_price),
     realizedPnl: numberOrNull(row.realized_pnl),
     totalFees: numberOrNull(row.total_fees),
+  };
+}
+
+function mapReviewableTrade(row: Record<string, unknown>): ReviewableTrade {
+  return {
+    ...mapTrade(row),
+    reconstructionKey: String(row.reconstruction_key ?? ""),
+  };
+}
+
+function mapTradeReviewGroup(
+  row: Record<string, unknown>,
+): TradeReviewGroupSource {
+  return {
+    id: String(row.id),
+    customName: row.custom_name ? String(row.custom_name) : null,
+    symbol: String(row.symbol),
+    createdAt: String(row.created_at),
+    updatedAt: String(row.updated_at),
+  };
+}
+
+function mapTradeReviewGroupMember(
+  row: Record<string, unknown>,
+): TradeReviewGroupMemberSource {
+  return {
+    groupId: String(row.group_id),
+    reconstructionKey: String(row.reconstruction_key),
   };
 }
 
