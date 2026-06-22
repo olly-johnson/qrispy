@@ -9,12 +9,22 @@ import {
   loadStopGroupRows,
   mapLatestPositions,
 } from "@/lib/app-data";
+import { getTradeReviewGroupCharts } from "@/lib/market-data/trade-charts";
 import { createSupabaseServerClient } from "@/lib/supabase/server";
 
 vi.mock("@/lib/supabase/server", () => ({
   createSupabaseAdminClient: vi.fn(() => null),
   createSupabaseServerClient: vi.fn(),
 }));
+
+vi.mock("@/lib/market-data/trade-charts", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("@/lib/market-data/trade-charts")>();
+
+  return {
+    ...actual,
+    getTradeReviewGroupCharts: vi.fn(),
+  };
+});
 
 describe("mapLatestPositions", () => {
   it("keeps only one row per account and symbol from the latest snapshot", () => {
@@ -683,9 +693,20 @@ describe("getTradeReviewGroupDetail", () => {
       "car-short": [allocatedFill("exit-short", "EXIT", "BUY", "2026-06-12T14:30:00.000Z")],
     };
     const from = groupDetailClient({ group, memberRows, tradeRows, fillsByTradeId });
+    vi.mocked(getTradeReviewGroupCharts).mockResolvedValueOnce({
+      charts: [],
+      error: null,
+    });
 
     await expect(
-      getTradeReviewGroupDetail("user-1", "group-1", { client: { from } }),
+      getTradeReviewGroupDetail("user-1", "group-1", {
+        client: { from },
+        marketDataClient: { from: vi.fn() },
+        marketDataProvider: {
+          name: "massive",
+          getAggregateBars: vi.fn(),
+        },
+      }),
     ).resolves.toMatchObject({
       id: "group-1",
       label: "CAR campaign",
@@ -693,6 +714,7 @@ describe("getTradeReviewGroupDetail", () => {
       tradeCount: 2,
       realizedPnl: -50,
       totalFees: 5,
+      charts: { charts: [], error: null },
       timeline: [
         {
           id: "car-long",
@@ -713,6 +735,18 @@ describe("getTradeReviewGroupDetail", () => {
     expect(from).toHaveBeenCalledWith("trade_review_group_members");
     expect(from).toHaveBeenCalledWith("trades");
     expect(from.mock.calls.filter(([table]) => table === "trade_fills")).toHaveLength(2);
+    expect(getTradeReviewGroupCharts).toHaveBeenCalledWith(
+      expect.objectContaining({
+        symbol: "CAR",
+        openedAt: "2026-06-02T14:30:00.000Z",
+        closedAt: "2026-06-12T14:30:00.000Z",
+        client: expect.any(Object),
+        trades: [
+          expect.objectContaining({ direction: "LONG", fills: expect.any(Array) }),
+          expect.objectContaining({ direction: "SHORT", fills: expect.any(Array) }),
+        ],
+      }),
+    );
   });
 
   it("returns null when every member reconstruction key is stale", async () => {

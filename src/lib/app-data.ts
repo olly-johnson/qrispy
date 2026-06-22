@@ -4,7 +4,11 @@ import { buildTradeExpectancySnapshots } from "@/lib/portfolio/expectancy";
 import { createSupabaseServerClient } from "@/lib/supabase/server";
 import { createSupabaseAdminClient } from "@/lib/supabase/server";
 import { createMassiveMarketDataProvider } from "@/lib/market-data/massive";
-import { getTradeCharts, type TradeCharts } from "@/lib/market-data/trade-charts";
+import {
+  getTradeCharts,
+  getTradeReviewGroupCharts,
+  type TradeCharts,
+} from "@/lib/market-data/trade-charts";
 import type { MarketDataProvider } from "@/lib/market-data/types";
 import {
   buildTradeHistoryItems,
@@ -531,7 +535,12 @@ export async function getTradeDetail(
 export async function getTradeReviewGroupDetail(
   userId: string,
   groupId: string,
-  options: { client?: unknown; now?: Date } = {},
+  options: {
+    client?: unknown;
+    marketDataClient?: unknown;
+    marketDataProvider?: MarketDataProvider | null;
+    now?: Date;
+  } = {},
 ): Promise<TradeReviewGroupDetail | null> {
   const supabase =
     (options.client as TradeReviewGroupDetailClient | undefined) ??
@@ -616,10 +625,44 @@ export async function getTradeReviewGroupDetail(
     return null;
   }
 
-  return {
+  const detail = {
     ...groupItem.group,
     timeline,
   };
+
+  const marketDataProvider =
+    options.marketDataProvider === undefined
+      ? createMassiveMarketDataProvider()
+      : options.marketDataProvider;
+  const marketDataClient =
+    options.marketDataClient ?? createSupabaseAdminClient();
+
+  if (marketDataClient && marketDataProvider) {
+    let charts: TradeCharts;
+
+    try {
+      charts = await getTradeReviewGroupCharts({
+        symbol: detail.symbol,
+        openedAt: detail.openedAt,
+        closedAt: detail.closedAt,
+        trades: timeline,
+        client: marketDataClient,
+        provider: marketDataProvider,
+      });
+    } catch (error) {
+      charts = {
+        charts: [],
+        error: `Market data unavailable: ${errorMessage(error)}`,
+      };
+    }
+
+    return {
+      ...detail,
+      charts,
+    };
+  }
+
+  return detail;
 }
 
 async function loadTradeDetailFills(input: {
