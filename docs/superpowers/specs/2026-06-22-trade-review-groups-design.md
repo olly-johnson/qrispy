@@ -17,11 +17,12 @@ or any other dashboard metric.
 ## Scope and rules
 
 - A group contains two or more closed trades.
-- All selected trades must have the same symbol and direction.
+- All selected trades must have the same symbol. Long and short trades may be
+  grouped together.
 - Trades from more than one account are allowed when those rules hold.
 - A trade can belong to at most one review group at a time.
-- A default label is derived from the symbol, direction, and date range, such
-  as `CAR SHORT - 2-16 Jun 2026`.
+- A default label is derived from the symbol and date range, such as
+  `CAR - 2-16 Jun 2026`.
 - The user can rename a group.
 - Removing a trade from a group returns it immediately to an individual row in
   the Trades list.
@@ -41,7 +42,7 @@ Grouped trades are suppressed from the default list. In their place, the list
 shows one group row with:
 
 - group label;
-- symbol and direction;
+- symbol;
 - first-open to final-close date range;
 - member trade count;
 - sum of realised P&L;
@@ -56,13 +57,15 @@ current behaviour.
 The group page is a campaign-review view with no edit path into broker-derived
 trades or fills.
 
-Its header shows the editable label, symbol, direction, date range, member
-count, total realised P&L, and total fees.
+Its header shows the editable label, symbol, date range, member count, total
+realised P&L, and total fees. Each timeline card retains the direction of its
+original trade.
 
 The page contains a combined symbol chart spanning the whole campaign. It
 offers Daily and 1-hour intervals. Every member trade's fill allocation is
-shown as a labelled entry or exit marker, so the chart reveals both the overall
-price action and the timing of every attempt.
+shown as a labelled entry or exit marker, including that trade's direction, so
+the chart reveals both the overall price action and the timing of every
+attempt.
 
 Below the chart, a chronological timeline has one card per original trade.
 Each card shows open and close time, duration, size, realised P&L, and concise
@@ -80,7 +83,6 @@ Add `trade_review_groups`:
 - `user_id uuid not null`;
 - `custom_name text null`;
 - `symbol text not null`;
-- `direction text not null`;
 - `created_at timestamptz not null`;
 - `updated_at timestamptz not null`.
 
@@ -123,9 +125,8 @@ Each action requires the authenticated owner and revalidates `/trades` plus the
 affected group page.
 
 Group creation re-queries the selected trades by user and validates that all
-are closed, have one symbol, have one direction, and are not already members
-of another group. The initial label is implicit unless a later rename stores a
-`custom_name`.
+are closed, have one symbol, and are not already members of another group. The
+initial label is implicit unless a later rename stores a `custom_name`.
 
 Removing the final member deletes the group. Deleting a group cascades only to
 its membership rows; the original reconstructed trades and their fills are
@@ -143,8 +144,7 @@ for this closed-trade review context.
 ## Error handling
 
 - Reject requests with fewer than two selected trades.
-- Reject open, missing, cross-symbol, cross-direction, or already-grouped
-  trades.
+- Reject open, missing, cross-symbol, or already-grouped trades.
 - Treat stale memberships whose reconstructed trades no longer exist as absent
   from the view; do not expose another user's data.
 - Preserve a useful chart-unavailable message when market data is missing or
@@ -168,4 +168,4 @@ for this closed-trade review context.
 - Combining broker trades or fills in the source data.
 - Altering realised P&L, fees, positions, or dashboard performance metrics.
 - Automatically grouping trades by date, symbol, or strategy.
-- Supporting mixed-symbol, mixed-direction, or open-trade groups.
+- Supporting mixed-symbol or open-trade groups.
