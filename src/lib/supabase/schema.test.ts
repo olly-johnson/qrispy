@@ -1,4 +1,4 @@
-import { readFileSync, readdirSync } from "node:fs";
+import { existsSync, readFileSync, readdirSync } from "node:fs";
 import { join } from "node:path";
 
 import { describe, expect, it } from "vitest";
@@ -254,5 +254,76 @@ describe("Cached breadth metrics index migration", () => {
       "provider, timeframe, adjusted, symbol, bar_start_at",
     );
     expect(sql).toContain("include (close)");
+  });
+});
+
+describe("Trade review groups migration", () => {
+  it("adds owner-scoped review groups and uniquely assigns reconstructed trades", () => {
+    const migrationPath = join(
+      process.cwd(),
+      "supabase",
+      "migrations",
+      "20260622100000_add_trade_review_groups.sql",
+    );
+
+    expect(existsSync(migrationPath)).toBe(true);
+
+    const sql = readFileSync(migrationPath, "utf8");
+    const normalizedSql = sql.replace(/\s+/g, " ").toLowerCase();
+    const groupTable = normalizedSql.match(
+      /create table public\.trade_review_groups \((.*?)\);/,
+    )?.[1];
+    const memberTable = normalizedSql.match(
+      /create table public\.trade_review_group_members \((.*?)\);/,
+    )?.[1];
+
+    expect(groupTable).toContain("id uuid primary key");
+    expect(groupTable).toContain(
+      "user_id uuid not null references auth.users(id) on delete cascade",
+    );
+    expect(groupTable).toContain("custom_name text");
+    expect(groupTable).toContain("symbol text not null");
+    expect(groupTable).toContain("created_at timestamptz not null default now()");
+    expect(groupTable).toContain("updated_at timestamptz not null default now()");
+    expect(groupTable).not.toMatch(/\bdirection\b/);
+
+    expect(memberTable).toContain(
+      "group_id uuid not null references public.trade_review_groups(id) on delete cascade",
+    );
+    expect(memberTable).toContain(
+      "user_id uuid not null references auth.users(id) on delete cascade",
+    );
+    expect(memberTable).toContain("reconstruction_key text not null");
+    expect(memberTable).toContain("created_at timestamptz not null default now()");
+    expect(memberTable).toContain("primary key (group_id, reconstruction_key)");
+    expect(memberTable).toContain("unique (user_id, reconstruction_key)");
+
+    expect(normalizedSql).toContain(
+      "trade_review_group_members_group_id_idx",
+    );
+    expect(normalizedSql).toContain(
+      "trade_review_group_members_user_reconstruction_key_idx",
+    );
+
+    for (const table of [
+      "trade_review_groups",
+      "trade_review_group_members",
+    ]) {
+      expect(normalizedSql).toContain(
+        `alter table public.${table} enable row level security`,
+      );
+      expect(normalizedSql).toContain(
+        `grant select, insert, update, delete on table public.${table} to authenticated, service_role`,
+      );
+
+      for (const action of ["select", "insert", "update", "delete"]) {
+        expect(normalizedSql).toContain(
+          `owner can ${action} ${table.replaceAll("_", " ")}`,
+        );
+      }
+    }
+
+    expect(normalizedSql).toContain("using ((select auth.uid()) = user_id)");
+    expect(normalizedSql).toContain("with check ((select auth.uid()) = user_id)");
   });
 });
