@@ -7,17 +7,24 @@ import { useState, useTransition } from "react";
 
 import {
   deleteTradeReviewGroup,
+  loadTradeReviewMemberCharts,
   removeTradeReviewGroupMember,
   renameTradeReviewGroup,
 } from "@/app/actions";
+import { TradeChartPanel } from "@/components/trade-chart-panel";
 import { formatDateTime, formatMoney } from "@/components/format";
 import type { TradeReviewGroupDetail as TradeReviewGroupDetailData } from "@/lib/app-data";
+import type { TradeCharts } from "@/lib/market-data/trade-charts";
 
 export function TradeReviewGroupDetail({ group }: { group: TradeReviewGroupDetailData }) {
   const router = useRouter();
   const [name, setName] = useState(group.customName ?? "");
   const [isPending, startTransition] = useTransition();
   const [error, setError] = useState<string | null>(null);
+  const [memberCharts, setMemberCharts] = useState<Record<string, TradeCharts>>({});
+  const [expandedMemberKeys, setExpandedMemberKeys] = useState<Record<string, boolean>>({});
+  const [loadingMemberKey, setLoadingMemberKey] = useState<string | null>(null);
+  const [memberChartErrors, setMemberChartErrors] = useState<Record<string, string>>({});
 
   function rename() {
     startTransition(async () => {
@@ -50,6 +57,36 @@ export function TradeReviewGroupDetail({ group }: { group: TradeReviewGroupDetai
         setError(messageFor(caught));
       }
     });
+  }
+
+  async function toggleMemberChart(reconstructionKey: string) {
+    if (expandedMemberKeys[reconstructionKey]) {
+      setExpandedMemberKeys((current) => ({ ...current, [reconstructionKey]: false }));
+      return;
+    }
+
+    if (memberCharts[reconstructionKey]) {
+      setExpandedMemberKeys((current) => ({ ...current, [reconstructionKey]: true }));
+      return;
+    }
+
+    setLoadingMemberKey(reconstructionKey);
+    setMemberChartErrors((current) => {
+      const { [reconstructionKey]: _ignored, ...remaining } = current;
+      return remaining;
+    });
+    try {
+      const charts = await loadTradeReviewMemberCharts(group.id, reconstructionKey);
+      setMemberCharts((current) => ({ ...current, [reconstructionKey]: charts }));
+      setExpandedMemberKeys((current) => ({ ...current, [reconstructionKey]: true }));
+    } catch (caught) {
+      setMemberChartErrors((current) => ({
+        ...current,
+        [reconstructionKey]: messageFor(caught),
+      }));
+    } finally {
+      setLoadingMemberKey((current) => (current === reconstructionKey ? null : current));
+    }
   }
 
   return (
@@ -123,6 +160,18 @@ export function TradeReviewGroupDetail({ group }: { group: TradeReviewGroupDetai
                   </p>
                 </div>
                 <div className="flex items-center gap-2">
+                  <button
+                    className="inline-flex h-8 items-center rounded-md border border-white/10 px-3 text-xs font-medium text-zinc-200 transition hover:border-cyan-300/50 hover:text-cyan-200 disabled:cursor-not-allowed disabled:opacity-50"
+                    disabled={loadingMemberKey === trade.reconstructionKey}
+                    onClick={() => void toggleMemberChart(trade.reconstructionKey)}
+                    type="button"
+                  >
+                    {loadingMemberKey === trade.reconstructionKey
+                      ? "Loading chart…"
+                      : expandedMemberKeys[trade.reconstructionKey]
+                        ? "Hide chart"
+                        : "View chart"}
+                  </button>
                   <Link
                     className="inline-flex h-8 items-center gap-1.5 rounded-md border border-white/10 px-3 text-xs font-medium text-zinc-200 transition hover:border-cyan-300/50 hover:text-cyan-200"
                     href={`/trades/${trade.id}`}
@@ -147,6 +196,17 @@ export function TradeReviewGroupDetail({ group }: { group: TradeReviewGroupDetai
                 <TradeMetric label="Avg entry" value={formatPrice(trade.avgEntryPrice)} />
                 <TradeMetric label="Avg exit" value={formatPrice(trade.avgExitPrice)} />
               </dl>
+              {memberChartErrors[trade.reconstructionKey] ? (
+                <p className="mt-4 text-sm text-rose-300">
+                  {memberChartErrors[trade.reconstructionKey]}
+                </p>
+              ) : null}
+              {expandedMemberKeys[trade.reconstructionKey] ? (
+                <TradeChartPanel
+                  charts={memberCharts[trade.reconstructionKey]}
+                  title="Original trade chart"
+                />
+              ) : null}
             </article>
           ))}
         </div>

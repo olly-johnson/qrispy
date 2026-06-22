@@ -141,8 +141,8 @@ describe("getTradeReviewGroupCharts", () => {
     expect(result.charts.map((chart) => chart.id)).toEqual(["daily", "hourly"]);
     expect(result.charts[0]?.markers).toEqual(
       expect.arrayContaining([
-        expect.objectContaining({ label: "T1 LONG ENTRY" }),
-        expect.objectContaining({ label: "T2 SHORT EXIT" }),
+        expect.objectContaining({ label: "T1 E" }),
+        expect.objectContaining({ label: "T2 X" }),
       ]),
     );
     expect(vi.mocked(provider.getAggregateBars).mock.calls.map(([request]) => request)).toEqual(

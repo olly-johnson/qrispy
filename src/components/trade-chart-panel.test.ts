@@ -78,13 +78,13 @@ describe("prepareChartData", () => {
           side: "BUY",
           role: "ENTRY",
           text: "ENTRY 10 @ $20",
-          label: "T1 LONG ENTRY",
+          label: "T1 E",
         },
       ],
     } satisfies TradeChartDataset);
 
     expect(prepared.markers[0]).toEqual(
-      expect.objectContaining({ text: "T1 LONG ENTRY" }),
+      expect.objectContaining({ text: "T1 E" }),
     );
   });
 
@@ -157,9 +157,9 @@ describe("MARKER_OPTIONS", () => {
 });
 
 describe("marker label visibility", () => {
-  it("uses larger marker glyphs and chart text for readable quantity labels", () => {
+  it("uses compact chart text so campaign marker annotations do not dominate", () => {
     expect(MARKER_SIZE).toBe(1.8);
-    expect(CHART_FONT_SIZE).toBe(14);
+    expect(CHART_FONT_SIZE).toBe(12);
   });
 });
 

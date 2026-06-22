@@ -286,7 +286,7 @@ function campaignMarkersForTrades(
         side: fill.side,
         role: fill.allocationRole,
         text: `${fill.allocationRole} ${formatQuantity(fill.allocatedQuantity)} @ ${formatPrice(fill.allocationPrice ?? fill.price)}`,
-        label: `T${tradeIndex + 1} ${trade.direction.toUpperCase()} ${fill.allocationRole}`,
+        label: `T${tradeIndex + 1} ${fill.allocationRole === "ENTRY" ? "E" : "X"}`,
       })),
   );
 }

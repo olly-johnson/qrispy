@@ -32,7 +32,7 @@ export const STOP_LINE_OPACITY = 0.5;
 export const STOP_PRICE_LINE_STYLE = LineStyle.Dashed;
 const STOP_LINE_RGBA = `rgba(${STOP_LINE_COLOR}, ${STOP_LINE_OPACITY})`;
 const STOP_DRAG_HIT_TOLERANCE_PX = 10;
-export const CHART_FONT_SIZE = 14;
+export const CHART_FONT_SIZE = 12;
 export const MARKER_SIZE = 1.8;
 export const PRICE_LINE_DISABLED_OPTIONS = {
   lastValueVisible: false,
