@@ -5,15 +5,27 @@ import {
   getDashboardData,
   getTradeDetail,
   getTradeHistory,
+  getTradeReviewGroupDetail,
+  getTradeReviewMemberCharts,
   loadStopGroupRows,
   mapLatestPositions,
 } from "@/lib/app-data";
+import { getTradeReviewGroupCharts } from "@/lib/market-data/trade-charts";
 import { createSupabaseServerClient } from "@/lib/supabase/server";
 
 vi.mock("@/lib/supabase/server", () => ({
   createSupabaseAdminClient: vi.fn(() => null),
   createSupabaseServerClient: vi.fn(),
 }));
+
+vi.mock("@/lib/market-data/trade-charts", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("@/lib/market-data/trade-charts")>();
+
+  return {
+    ...actual,
+    getTradeReviewGroupCharts: vi.fn(),
+  };
+});
 
 describe("mapLatestPositions", () => {
   it("keeps only one row per account and symbol from the latest snapshot", () => {
@@ -451,6 +463,8 @@ describe("getDashboardData", () => {
       gainLossRatio: 2,
     });
     expect(data.expectancy.last30.tradeCount).toBe(2);
+    expect(from).not.toHaveBeenCalledWith("trade_review_groups");
+    expect(from).not.toHaveBeenCalledWith("trade_review_group_members");
   });
 });
 
@@ -488,7 +502,16 @@ describe("getTradeHistory", () => {
     const lt = vi.fn(() => ({ order }));
     const eq = vi.fn(() => ({ lt }));
     const select = vi.fn(() => ({ eq }));
-    const from = vi.fn(() => ({ select }));
+    const emptyGroupOrder = vi.fn().mockResolvedValue({ data: [], error: null });
+    const emptyGroupUserEq = vi.fn(() => ({ order: emptyGroupOrder }));
+    const emptyGroupSelect = vi.fn(() => ({ eq: emptyGroupUserEq }));
+    const from = vi.fn((table: string) => {
+      if (table === "trades") {
+        return { select };
+      }
+
+      return { select: emptyGroupSelect };
+    });
 
     await expect(
       getTradeHistory("user-1", {
@@ -497,18 +520,22 @@ describe("getTradeHistory", () => {
       }),
     ).resolves.toEqual([
       {
-        id: "trade-1",
-        symbol: "SNDK",
-        direction: "LONG",
-        status: "CLOSED",
-        openedAt: "2025-12-19T14:50:30.000Z",
-        closedAt: "2026-01-06T14:31:11.000Z",
-        entryQuantity: 2,
-        maxAbsQuantity: 2,
-        avgEntryPrice: 238.875,
-        avgExitPrice: 435,
-        realizedPnl: 12.5,
-        totalFees: 1.25,
+        kind: "trade",
+        trade: {
+          id: "trade-1",
+          symbol: "SNDK",
+          direction: "LONG",
+          status: "CLOSED",
+          openedAt: "2025-12-19T14:50:30.000Z",
+          closedAt: "2026-01-06T14:31:11.000Z",
+          entryQuantity: 2,
+          maxAbsQuantity: 2,
+          avgEntryPrice: 238.875,
+          avgExitPrice: 435,
+          realizedPnl: 12.5,
+          totalFees: 1.25,
+          reconstructionKey: "",
+        },
       },
     ]);
 
@@ -519,7 +546,456 @@ describe("getTradeHistory", () => {
     expect(order).toHaveBeenCalledWith("opened_at", { ascending: false });
     expect(JSON.stringify({ from: from.mock.calls })).not.toContain("limit");
   });
+
+  it("collapses current review-group members while leaving other trades available", async () => {
+    const trades = [
+      tradeHistoryRow({
+        id: "car-long",
+        reconstructionKey: "car-long-key",
+        symbol: "CAR",
+        direction: "LONG",
+        openedAt: "2026-06-02T14:30:00.000Z",
+        closedAt: "2026-06-03T14:30:00.000Z",
+        realizedPnl: -20,
+        totalFees: 2,
+      }),
+      tradeHistoryRow({
+        id: "car-short",
+        reconstructionKey: "car-short-key",
+        symbol: "CAR",
+        direction: "SHORT",
+        openedAt: "2026-06-10T14:30:00.000Z",
+        closedAt: "2026-06-12T14:30:00.000Z",
+        realizedPnl: -30,
+        totalFees: 3,
+      }),
+      tradeHistoryRow({
+        id: "amd",
+        reconstructionKey: "amd-key",
+        symbol: "AMD",
+        direction: "LONG",
+        openedAt: "2026-06-14T14:30:00.000Z",
+        closedAt: "2026-06-15T14:30:00.000Z",
+        realizedPnl: 10,
+        totalFees: 1,
+      }),
+    ];
+    const from = historyClient({
+      trades,
+      groups: [
+        {
+          id: "group-1",
+          custom_name: null,
+          symbol: "CAR",
+          created_at: "2026-06-16T12:00:00.000Z",
+          updated_at: "2026-06-16T12:00:00.000Z",
+        },
+      ],
+      members: [
+        { group_id: "group-1", reconstruction_key: "car-long-key" },
+        { group_id: "group-1", reconstruction_key: "car-short-key" },
+      ],
+    });
+
+    await expect(
+      getTradeHistory("user-1", { client: { from } }),
+    ).resolves.toMatchObject([
+      {
+        kind: "trade",
+        trade: { id: "amd", reconstructionKey: "amd-key" },
+      },
+      {
+        kind: "group",
+        group: {
+          id: "group-1",
+          symbol: "CAR",
+          tradeCount: 2,
+          realizedPnl: -50,
+          totalFees: 5,
+        },
+      },
+    ]);
+  });
+
+  it("does not hide a current trade when its membership reconstruction key is stale", async () => {
+    const from = historyClient({
+      trades: [
+        tradeHistoryRow({
+          id: "car-current",
+          reconstructionKey: "car-current-key",
+          symbol: "CAR",
+          direction: "SHORT",
+          openedAt: "2026-06-10T14:30:00.000Z",
+          closedAt: "2026-06-12T14:30:00.000Z",
+          realizedPnl: -30,
+          totalFees: 3,
+        }),
+      ],
+      groups: [
+        {
+          id: "group-1",
+          custom_name: null,
+          symbol: "CAR",
+          created_at: "2026-06-16T12:00:00.000Z",
+          updated_at: "2026-06-16T12:00:00.000Z",
+        },
+      ],
+      members: [{ group_id: "group-1", reconstruction_key: "stale-key" }],
+    });
+
+    await expect(
+      getTradeHistory("user-1", { client: { from } }),
+    ).resolves.toMatchObject([
+      {
+        kind: "trade",
+        trade: { id: "car-current", reconstructionKey: "car-current-key" },
+      },
+    ]);
+  });
 });
+
+describe("getTradeReviewGroupDetail", () => {
+  it("loads an owner-scoped chronological timeline with allocated fills and group totals", async () => {
+    const group = {
+      id: "group-1",
+      custom_name: "CAR campaign",
+      symbol: "CAR",
+      created_at: "2026-06-16T12:00:00.000Z",
+      updated_at: "2026-06-16T12:00:00.000Z",
+    };
+    const memberRows = [
+      { group_id: "group-1", reconstruction_key: "car-short-key" },
+      { group_id: "group-1", reconstruction_key: "car-long-key" },
+    ];
+    const tradeRows = [
+      tradeHistoryRow({
+        id: "car-short",
+        reconstructionKey: "car-short-key",
+        symbol: "CAR",
+        direction: "SHORT",
+        openedAt: "2026-06-10T14:30:00.000Z",
+        closedAt: "2026-06-12T14:30:00.000Z",
+        realizedPnl: -30,
+        totalFees: 3,
+      }),
+      tradeHistoryRow({
+        id: "car-long",
+        reconstructionKey: "car-long-key",
+        symbol: "CAR",
+        direction: "LONG",
+        openedAt: "2026-06-02T14:30:00.000Z",
+        closedAt: "2026-06-03T14:30:00.000Z",
+        realizedPnl: -20,
+        totalFees: 2,
+      }),
+    ];
+    const fillsByTradeId = {
+      "car-long": [allocatedFill("entry-long", "ENTRY", "BUY", "2026-06-02T14:30:00.000Z")],
+      "car-short": [allocatedFill("exit-short", "EXIT", "BUY", "2026-06-12T14:30:00.000Z")],
+    };
+    const from = groupDetailClient({ group, memberRows, tradeRows, fillsByTradeId });
+    vi.mocked(getTradeReviewGroupCharts).mockResolvedValueOnce({
+      charts: [],
+      error: null,
+    });
+
+    await expect(
+      getTradeReviewGroupDetail("user-1", "group-1", {
+        client: { from },
+        marketDataClient: { from: vi.fn() },
+        marketDataProvider: {
+          name: "massive",
+          getAggregateBars: vi.fn(),
+        },
+      }),
+    ).resolves.toMatchObject({
+      id: "group-1",
+      label: "CAR campaign",
+      symbol: "CAR",
+      tradeCount: 2,
+      realizedPnl: -50,
+      totalFees: 5,
+      charts: { charts: [], error: null },
+      timeline: [
+        {
+          id: "car-long",
+          direction: "LONG",
+          reconstructionKey: "car-long-key",
+          fills: [{ id: "entry-long", allocationRole: "ENTRY" }],
+        },
+        {
+          id: "car-short",
+          direction: "SHORT",
+          reconstructionKey: "car-short-key",
+          fills: [{ id: "exit-short", allocationRole: "EXIT" }],
+        },
+      ],
+    });
+
+    expect(from).toHaveBeenCalledWith("trade_review_groups");
+    expect(from).toHaveBeenCalledWith("trade_review_group_members");
+    expect(from).toHaveBeenCalledWith("trades");
+    expect(from.mock.calls.filter(([table]) => table === "trade_fills")).toHaveLength(2);
+    expect(getTradeReviewGroupCharts).toHaveBeenCalledWith(
+      expect.objectContaining({
+        symbol: "CAR",
+        openedAt: "2026-06-02T14:30:00.000Z",
+        closedAt: "2026-06-12T14:30:00.000Z",
+        client: expect.any(Object),
+        trades: [
+          expect.objectContaining({ direction: "LONG", fills: expect.any(Array) }),
+          expect.objectContaining({ direction: "SHORT", fills: expect.any(Array) }),
+        ],
+      }),
+    );
+  });
+
+  it("returns null when every member reconstruction key is stale", async () => {
+    const from = groupDetailClient({
+      group: {
+        id: "group-1",
+        custom_name: null,
+        symbol: "CAR",
+        created_at: "2026-06-16T12:00:00.000Z",
+        updated_at: "2026-06-16T12:00:00.000Z",
+      },
+      memberRows: [{ group_id: "group-1", reconstruction_key: "stale-key" }],
+      tradeRows: [],
+      fillsByTradeId: {},
+    });
+
+    await expect(
+      getTradeReviewGroupDetail("user-1", "group-1", { client: { from } }),
+    ).resolves.toBeNull();
+  });
+
+  it("returns null when fewer than two group members remain closed", async () => {
+    const closedTrade = tradeHistoryRow({
+      id: "car-closed",
+      reconstructionKey: "car-closed-key",
+      symbol: "CAR",
+      direction: "LONG",
+      openedAt: "2026-06-02T14:30:00.000Z",
+      closedAt: "2026-06-03T14:30:00.000Z",
+      realizedPnl: -20,
+      totalFees: 2,
+    });
+    const openTrade = {
+      ...tradeHistoryRow({
+        id: "car-open",
+        reconstructionKey: "car-open-key",
+        symbol: "CAR",
+        direction: "SHORT",
+        openedAt: "2026-06-10T14:30:00.000Z",
+        closedAt: "2026-06-12T14:30:00.000Z",
+        realizedPnl: 0,
+        totalFees: 0,
+      }),
+      status: "OPEN",
+      closed_at: null,
+    };
+    const from = groupDetailClient({
+      group: {
+        id: "group-1",
+        custom_name: null,
+        symbol: "CAR",
+        created_at: "2026-06-16T12:00:00.000Z",
+        updated_at: "2026-06-16T12:00:00.000Z",
+      },
+      memberRows: [
+        { group_id: "group-1", reconstruction_key: "car-closed-key" },
+        { group_id: "group-1", reconstruction_key: "car-open-key" },
+      ],
+      tradeRows: [closedTrade, openTrade],
+      fillsByTradeId: {
+        "car-closed": [
+          allocatedFill("entry-closed", "ENTRY", "BUY", "2026-06-02T14:30:00.000Z"),
+        ],
+      },
+    });
+
+    await expect(
+      getTradeReviewGroupDetail("user-1", "group-1", { client: { from } }),
+    ).resolves.toBeNull();
+  });
+});
+
+describe("getTradeReviewMemberCharts", () => {
+  it("loads the original trade charts after verifying the owner and member key", async () => {
+    const { from, calls } = reviewMemberChartClient({
+      membership: { reconstruction_key: "car-short" },
+      trade: { id: "trade-1" },
+    });
+
+    await expect(
+      getTradeReviewMemberCharts("user-1", "group-1", "car-short", {
+        client: { from },
+        marketDataClient: { from: vi.fn() },
+        marketDataProvider: null,
+      }),
+    ).resolves.toEqual({ charts: [], error: "Market data unavailable." });
+
+    expect(calls.membershipUserId).toHaveBeenCalledWith("user_id", "user-1");
+    expect(calls.membershipGroupId).toHaveBeenCalledWith("group_id", "group-1");
+    expect(calls.membershipKey).toHaveBeenCalledWith("reconstruction_key", "car-short");
+    expect(calls.tradeUserId).toHaveBeenCalledWith("user_id", "user-1");
+    expect(calls.tradeKey).toHaveBeenCalledWith("reconstruction_key", "car-short");
+  });
+
+  it.each([
+    ["missing", null, { id: "trade-1" }],
+    ["foreign or non-member", null, { id: "trade-1" }],
+    ["stale", { reconstruction_key: "car-short" }, null],
+  ])("rejects a %s review member request", async (_reason, membership, trade) => {
+    const { from } = reviewMemberChartClient({ membership, trade });
+
+    await expect(
+      getTradeReviewMemberCharts("user-1", "group-1", "car-short", { client: { from } }),
+    ).rejects.toThrow("Trade review group member not found.");
+  });
+});
+
+function tradeHistoryRow(input: {
+  id: string;
+  reconstructionKey: string;
+  symbol: string;
+  direction: string;
+  openedAt: string;
+  closedAt: string;
+  realizedPnl: number;
+  totalFees: number;
+}) {
+  return {
+    id: input.id,
+    reconstruction_key: input.reconstructionKey,
+    symbol: input.symbol,
+    direction: input.direction,
+    status: "CLOSED",
+    opened_at: input.openedAt,
+    closed_at: input.closedAt,
+    entry_quantity: 10,
+    max_abs_quantity: 10,
+    avg_entry_price: 10,
+    avg_exit_price: 11,
+    realized_pnl: input.realizedPnl,
+    total_fees: input.totalFees,
+  };
+}
+
+function historyClient(input: {
+  trades: Record<string, unknown>[];
+  groups: Record<string, unknown>[];
+  members: Record<string, unknown>[];
+}) {
+  return vi.fn((table: string) => {
+    const data =
+      table === "trades"
+        ? input.trades
+        : table === "trade_review_groups"
+          ? input.groups
+          : input.members;
+    const result = { data, error: null };
+    const order = vi.fn().mockResolvedValue(result);
+
+    if (table === "trades") {
+      const lt = vi.fn(() => ({ order }));
+      return { select: vi.fn(() => ({ eq: vi.fn(() => ({ lt })) })) };
+    }
+
+    return { select: vi.fn(() => ({ eq: vi.fn(() => ({ order })) })) };
+  });
+}
+
+function allocatedFill(
+  id: string,
+  allocationRole: "ENTRY" | "EXIT",
+  side: "BUY" | "SELL",
+  executedAt: string,
+) {
+  return {
+    allocated_quantity: 10,
+    allocation_role: allocationRole,
+    allocation_price: 10,
+    fills: {
+      id,
+      source_fill_id: id,
+      side,
+      quantity: 10,
+      price: 10,
+      executed_at: executedAt,
+      commission: 0,
+      sec_fee: 1,
+      taf_fee: 0,
+      nscc_fee: 0,
+      nasdaq_fee: 0,
+      ecn_remove_fee: 0,
+      ecn_add_rebate: 0,
+      raw_payload: {},
+    },
+  };
+}
+
+function groupDetailClient(input: {
+  group: Record<string, unknown>;
+  memberRows: Record<string, unknown>[];
+  tradeRows: Record<string, unknown>[];
+  fillsByTradeId: Record<string, Record<string, unknown>[]>;
+}) {
+  return vi.fn((table: string) => {
+    if (table === "trade_review_groups") {
+      return {
+        select: vi.fn(() => ({
+          eq: vi.fn(() => ({
+            eq: vi.fn(() => ({
+              maybeSingle: vi.fn().mockResolvedValue({ data: input.group, error: null }),
+            })),
+          })),
+        })),
+      };
+    }
+
+    if (table === "trade_review_group_members") {
+      return {
+        select: vi.fn(() => ({
+          eq: vi.fn(() => ({
+            eq: vi.fn(() => ({
+              order: vi.fn().mockResolvedValue({ data: input.memberRows, error: null }),
+            })),
+          })),
+        })),
+      };
+    }
+
+    if (table === "trades") {
+      return {
+        select: vi.fn(() => ({
+          eq: vi.fn(() => ({
+            in: vi.fn(() => ({
+              order: vi.fn().mockResolvedValue({ data: input.tradeRows, error: null }),
+            })),
+          })),
+        })),
+      };
+    }
+
+    if (table === "trade_fills") {
+      return {
+        select: vi.fn(() => ({
+          eq: vi.fn(() => ({
+            eq: vi.fn((_column: string, tradeId: string) => ({
+              order: vi.fn().mockResolvedValue({
+                data: input.fillsByTradeId[tradeId] ?? [],
+                error: null,
+              }),
+            })),
+          })),
+        })),
+      };
+    }
+
+    throw new Error(`Unexpected table ${table}`);
+  });
+}
 
 function dashboardTradeRow(input: {
   id: string;
@@ -1044,4 +1520,91 @@ function detailStoredFill(input: {
     sec_fee: input.fees,
     raw_payload: {},
   };
+}
+
+function reviewMemberChartClient(input: {
+  membership: Record<string, unknown> | null;
+  trade: Record<string, unknown> | null;
+}) {
+  const calls = {
+    membershipUserId: vi.fn(),
+    membershipGroupId: vi.fn(),
+    membershipKey: vi.fn(),
+    tradeUserId: vi.fn(),
+    tradeKey: vi.fn(),
+  };
+  const membershipMaybeSingle = vi.fn().mockResolvedValue({ data: input.membership, error: null });
+  calls.membershipKey.mockImplementation(() => ({ maybeSingle: membershipMaybeSingle }));
+  calls.membershipGroupId.mockImplementation(() => ({ eq: calls.membershipKey }));
+  calls.membershipUserId.mockImplementation(() => ({ eq: calls.membershipGroupId }));
+
+  const keyedTradeMaybeSingle = vi.fn().mockResolvedValue({ data: input.trade, error: null });
+  const detailTradeMaybeSingle = vi.fn().mockResolvedValue({
+    data: input.trade
+      ? {
+          id: "trade-1",
+          account_id: "account-1",
+          reconstruction_key: "car-short",
+          symbol: "CAR",
+          direction: "SHORT",
+          status: "CLOSED",
+          opened_at: "2026-06-02T14:30:00.000Z",
+          closed_at: "2026-06-02T18:00:00.000Z",
+          entry_quantity: 100,
+          max_abs_quantity: 100,
+          avg_entry_price: 10,
+          avg_exit_price: 11,
+          realized_pnl: -100,
+          total_fees: 2,
+        }
+      : null,
+    error: null,
+  });
+  const tradeSecondEq = vi.fn((column: string) =>
+    column === "reconstruction_key"
+      ? { maybeSingle: keyedTradeMaybeSingle }
+      : { maybeSingle: detailTradeMaybeSingle },
+  );
+  calls.tradeKey.mockImplementation((column: string, value: string) => tradeSecondEq(column, value));
+  const tradeFirstEq = vi.fn((column: string, value: string) => {
+    calls.tradeUserId(column, value);
+    return { eq: calls.tradeKey };
+  });
+
+  const fillsOrder = vi.fn().mockResolvedValue({ data: [], error: null });
+  const fillsTradeId = vi.fn(() => ({ order: fillsOrder }));
+  const fillsUserId = vi.fn(() => ({ eq: fillsTradeId }));
+  const stopOrder = vi.fn().mockResolvedValue({ data: [], error: null });
+  const stopIn = vi.fn(() => ({ order: stopOrder }));
+  const stopUserId = vi.fn(() => ({ in: stopIn }));
+  const rawFillsOrder = vi.fn().mockResolvedValue({ data: [], error: null });
+  const rawFillsQuery = {
+    eq: vi.fn(),
+    gte: vi.fn(),
+    lte: vi.fn(),
+    order: rawFillsOrder,
+  };
+  rawFillsQuery.eq.mockReturnValue(rawFillsQuery);
+  rawFillsQuery.gte.mockReturnValue(rawFillsQuery);
+  rawFillsQuery.lte.mockReturnValue(rawFillsQuery);
+  const from = vi.fn((table: string) => {
+    if (table === "trade_review_group_members") {
+      return { select: vi.fn(() => ({ eq: calls.membershipUserId })) };
+    }
+    if (table === "trades") {
+      return { select: vi.fn(() => ({ eq: tradeFirstEq })) };
+    }
+    if (table === "trade_fills") {
+      return { select: vi.fn(() => ({ eq: fillsUserId })) };
+    }
+    if (table === "trade_stop_groups") {
+      return { select: vi.fn(() => ({ eq: stopUserId })) };
+    }
+    if (table === "fills") {
+      return { select: vi.fn(() => rawFillsQuery) };
+    }
+    throw new Error(`Unexpected table ${table}`);
+  });
+
+  return { from, calls };
 }
