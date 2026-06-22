@@ -142,6 +142,8 @@ function booleanSearchParam(value: string | undefined, fallback: boolean) {
 }
 
 type SummaryStorage = Pick<Storage, "getItem" | "setItem">;
+type ClearableSummaryStorage = SummaryStorage &
+  Pick<Storage, "key" | "length" | "removeItem">;
 
 type CachedSummaryPayload = {
   result: GappersNewsSummaryResult;
@@ -152,7 +154,8 @@ type LastSummaryResultsPayload = {
   savedAt: number;
 };
 
-const LAST_SUMMARY_RESULTS_KEY = "qrispy:gapper-news-summary:last-results";
+const SUMMARY_CACHE_KEY_PREFIX = "qrispy:gapper-news-summary:";
+const LAST_SUMMARY_RESULTS_KEY = `${SUMMARY_CACHE_KEY_PREFIX}last-results`;
 const EASTERN_TIME_ZONE = "America/New_York";
 
 export function getCachedGappersSummaryResults({
@@ -281,6 +284,20 @@ export function saveLastGappersSummaryResults({
   );
 }
 
+export function clearGappersNewsSummaryCache({
+  storage,
+}: {
+  storage: ClearableSummaryStorage;
+}) {
+  const keys = Array.from({ length: storage.length }, (_, index) => storage.key(index))
+    .filter((key): key is string => key != null)
+    .filter((key) => key.startsWith(SUMMARY_CACHE_KEY_PREFIX));
+
+  for (const key of keys) {
+    storage.removeItem(key);
+  }
+}
+
 function buildGappersSummaryCacheKey({
   model,
   provider,
@@ -290,14 +307,7 @@ function buildGappersSummaryCacheKey({
   provider: string;
   request: GappersSummaryRequest;
 }) {
-  return [
-    "qrispy",
-    "gapper-news-summary",
-    provider,
-    model,
-    request.symbol,
-    request.previousCloseAt,
-  ].join(":");
+  return `${SUMMARY_CACHE_KEY_PREFIX}${provider}:${model}:${request.symbol}:${request.previousCloseAt}`;
 }
 
 function readCachedSummary({
