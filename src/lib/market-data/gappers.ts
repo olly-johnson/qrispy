@@ -6,6 +6,7 @@ import {
   buildCommonStockUniverse,
   normalizeMarketSnapshotTicker,
 } from "./market-universe";
+import { isUsEquityTradingDay } from "./us-equity-calendar";
 import type { MarketDataRequest, OhlcvBar } from "./types";
 
 export type GappersMode = "extended" | "regular";
@@ -122,7 +123,7 @@ export function getGappersMode(now: Date): GappersMode {
   const parts = easternDateParts(now);
   const minutes = parts.hour * 60 + parts.minute + parts.second / 60;
 
-  return isWeekday(parts) && minutes >= 4 * 60 && minutes < 9 * 60 + 30
+  return isUsEquityTradingDay(parts) && minutes >= 4 * 60 && minutes < 9 * 60 + 30
     ? "extended"
     : "regular";
 }
@@ -131,7 +132,7 @@ function isRegularMarketOpen(now: Date) {
   const parts = easternDateParts(now);
   const minutes = parts.hour * 60 + parts.minute + parts.second / 60;
 
-  return isWeekday(parts) && minutes >= 9 * 60 + 30 && minutes < 16 * 60;
+  return isUsEquityTradingDay(parts) && minutes >= 9 * 60 + 30 && minutes < 16 * 60;
 }
 
 export function getExtendedHoursWindows(now: Date): ExtendedHoursWindow[] {
@@ -356,17 +357,9 @@ function getPreviousTradingDayParts(now: Date) {
 
   do {
     cursor.setUTCDate(cursor.getUTCDate() - 1);
-  } while (!isWeekday(easternDateParts(cursor)));
+  } while (!isUsEquityTradingDay(easternDateParts(cursor)));
 
   return easternDateParts(cursor);
-}
-
-function isWeekday(parts: ReturnType<typeof easternDateParts>) {
-  const dayOfWeek = new Date(
-    Date.UTC(parts.year, parts.month - 1, parts.day, 12),
-  ).getUTCDay();
-
-  return dayOfWeek >= 1 && dayOfWeek <= 5;
 }
 
 function easternDateTimeToUtc(
