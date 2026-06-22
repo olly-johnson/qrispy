@@ -3,6 +3,33 @@ export type TradeStatus = "OPEN" | "CLOSED";
 export type FillSide = "BUY" | "SELL";
 export type AllocationRole = "ENTRY" | "EXIT";
 
+export const TRADE_SETUP_TYPES = [
+  "breakout",
+  "episodic_pivot",
+  "parabolic_short",
+  "mean_reversion",
+  "backside",
+  "other",
+] as const;
+export type TradeSetupType = (typeof TRADE_SETUP_TYPES)[number];
+
+export const TRADE_GRADES = ["A", "B", "C", "D", "F"] as const;
+export type TradeGrade = (typeof TRADE_GRADES)[number];
+
+export type TradeReview = {
+  id: string;
+  userId: string;
+  tradeId: string;
+  setupType: TradeSetupType | null;
+  grade: TradeGrade | null;
+  summary: string | null;
+  whatWentWell: string | null;
+  whatWentWrong: string | null;
+  lessonsLearned: string | null;
+  createdAt: string;
+  updatedAt: string;
+};
+
 export type CanonicalFill = {
   id: string;
   userId: string;
