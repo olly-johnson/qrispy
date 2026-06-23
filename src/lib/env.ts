@@ -26,6 +26,14 @@ export type NewsSummaryLlmConfig = {
   provider: NewsSummaryLlmProvider;
 };
 
+export type NewsSummaryWebSearchConfig =
+  | { apiKey: string; enabled: true; provider: "openai" }
+  | { enabled: false; provider: "openai" };
+
+export type NewsSummaryXConfig =
+  | { bearerToken: string; enabled: true }
+  | { enabled: false };
+
 export function getPublicSupabaseConfig(): PublicSupabaseConfig | null {
   const url = process.env.NEXT_PUBLIC_SUPABASE_URL;
   const anonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
@@ -104,6 +112,31 @@ export function getNewsSummaryLlmConfig(): NewsSummaryLlmConfig | null {
     model: process.env.NEWS_SUMMARY_LLM_MODEL ?? "gpt-4o-mini",
     provider: "openai",
   };
+}
+
+export function getNewsSummaryWebSearchConfig(): NewsSummaryWebSearchConfig {
+  const enabled =
+    (process.env.NEWS_SUMMARY_WEB_SEARCH_ENABLED ?? "false").toLowerCase() ===
+    "true";
+  const apiKey = process.env.OPENAI_API_KEY;
+
+  if (!enabled || !apiKey) {
+    return { enabled: false, provider: "openai" };
+  }
+
+  return { apiKey, enabled: true, provider: "openai" };
+}
+
+export function getNewsSummaryXConfig(): NewsSummaryXConfig {
+  const enabled =
+    (process.env.NEWS_SUMMARY_X_ENABLED ?? "false").toLowerCase() === "true";
+  const bearerToken = process.env.X_API_BEARER_TOKEN;
+
+  if (!enabled || !bearerToken) {
+    return { enabled: false };
+  }
+
+  return { bearerToken, enabled: true };
 }
 
 export function getAppBaseUrl() {

@@ -1,6 +1,10 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 
-import { getNewsSummaryLlmConfig } from "./env";
+import {
+  getNewsSummaryLlmConfig,
+  getNewsSummaryWebSearchConfig,
+  getNewsSummaryXConfig,
+} from "./env";
 
 describe("getNewsSummaryLlmConfig", () => {
   afterEach(() => {
@@ -34,5 +38,54 @@ describe("getNewsSummaryLlmConfig", () => {
       model: "gpt-4o-2024-08-06",
       provider: "openai",
     });
+  });
+});
+
+describe("getNewsSummaryWebSearchConfig", () => {
+  afterEach(() => {
+    vi.unstubAllEnvs();
+  });
+
+  it("enables OpenAI web search when requested and OpenAI is configured", () => {
+    vi.stubEnv("OPENAI_API_KEY", "openai-key");
+    vi.stubEnv("NEWS_SUMMARY_WEB_SEARCH_ENABLED", "true");
+
+    expect(getNewsSummaryWebSearchConfig()).toEqual({
+      apiKey: "openai-key",
+      enabled: true,
+      provider: "openai",
+    });
+  });
+
+  it("disables web search by default", () => {
+    vi.stubEnv("OPENAI_API_KEY", "openai-key");
+
+    expect(getNewsSummaryWebSearchConfig()).toEqual({
+      enabled: false,
+      provider: "openai",
+    });
+  });
+});
+
+describe("getNewsSummaryXConfig", () => {
+  afterEach(() => {
+    vi.unstubAllEnvs();
+  });
+
+  it("enables X only when explicitly enabled with a bearer token", () => {
+    vi.stubEnv("NEWS_SUMMARY_X_ENABLED", "true");
+    vi.stubEnv("X_API_BEARER_TOKEN", "x-token");
+
+    expect(getNewsSummaryXConfig()).toEqual({
+      bearerToken: "x-token",
+      enabled: true,
+    });
+  });
+
+  it("skips X when the token is missing", () => {
+    vi.stubEnv("NEWS_SUMMARY_X_ENABLED", "true");
+    vi.stubEnv("X_API_BEARER_TOKEN", "");
+
+    expect(getNewsSummaryXConfig()).toEqual({ enabled: false });
   });
 });
