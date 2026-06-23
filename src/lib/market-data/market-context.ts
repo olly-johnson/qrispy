@@ -188,7 +188,14 @@ export function createOpenAiMarketContextProvider(input: {
         body: JSON.stringify({
           input: `Extract a compact market brief for ${marketDate} from these sources only: ${JSON.stringify(sources)}. Return JSON with headline, notableNews, and events. Each item requires category, kind (scheduled or developing), summary, timeEt (string or null), and sourceIds containing source ids from the supplied sources. Do not invent facts or times.`,
           model: input.model,
-          text: { format: { name: "market_context_brief", type: "json_object" } },
+          text: {
+            format: {
+              name: "market_context_brief",
+              schema: MARKET_CONTEXT_JSON_SCHEMA,
+              strict: true,
+              type: "json_schema",
+            },
+          },
         }),
         headers: { authorization: `Bearer ${input.apiKey}`, "content-type": "application/json" },
         method: "POST",
@@ -317,3 +324,29 @@ function isMarketContextItem(value: unknown): value is MarketContextItem {
 
 function isHttpUrl(value: unknown): value is string { try { return typeof value === "string" && ["http:", "https:"].includes(new URL(value).protocol); } catch { return false; } }
 function publisherFromUrl(url: string) { return new URL(url).hostname.replace(/^www\./, ""); }
+
+const MARKET_CONTEXT_JSON_SCHEMA = {
+  additionalProperties: false,
+  properties: {
+    events: { items: marketContextItemSchema(), type: "array" },
+    headline: { type: "string" },
+    notableNews: { items: marketContextItemSchema(), type: "array" },
+  },
+  required: ["headline", "notableNews", "events"],
+  type: "object",
+};
+
+function marketContextItemSchema() {
+  return {
+    additionalProperties: false,
+    properties: {
+      category: { type: "string" },
+      kind: { enum: ["developing", "scheduled"], type: "string" },
+      sourceIds: { items: { type: "string" }, type: "array" },
+      summary: { type: "string" },
+      timeEt: { anyOf: [{ type: "string" }, { type: "null" }] },
+    },
+    required: ["category", "kind", "sourceIds", "summary", "timeEt"],
+    type: "object",
+  };
+}

@@ -206,6 +206,15 @@ describe("createOpenAiMarketContextProvider", () => {
     });
     expect(String(fetcher.mock.calls[0]?.[1]?.body)).toContain("2026-06-23");
     expect(String(fetcher.mock.calls[1]?.[1]?.body)).toContain("web:0");
+    expect(JSON.parse(fetcher.mock.calls[1]?.[1]?.body as string)).toMatchObject({
+      text: {
+        format: {
+          name: "market_context_brief",
+          strict: true,
+          type: "json_schema",
+        },
+      },
+    });
   });
 
   it("rejects extracted items that cite unknown sources", async () => {
