@@ -4,9 +4,14 @@ import { POST } from "./route";
 
 const mocks = vi.hoisted(() => ({
   batchSummarizeGapperNews: vi.fn(),
+  collectGapperNewsSources: vi.fn(),
   createOpenAiNewsSummaryProvider: vi.fn(),
+  createOpenAiWebNewsSearchProvider: vi.fn(),
+  createXNewsSearchProvider: vi.fn(),
   getCurrentUser: vi.fn(),
   getNewsSummaryLlmConfig: vi.fn(),
+  getNewsSummaryWebSearchConfig: vi.fn(),
+  getNewsSummaryXConfig: vi.fn(),
   getTickerNews: vi.fn(),
   requireUser: vi.fn(),
   resolveNewsSummaryModel: vi.fn(),
@@ -23,6 +28,14 @@ vi.mock("@/lib/env", () => ({
     baseUrl: "https://api.massive.com",
   }),
   getNewsSummaryLlmConfig: mocks.getNewsSummaryLlmConfig,
+  getNewsSummaryWebSearchConfig: mocks.getNewsSummaryWebSearchConfig,
+  getNewsSummaryXConfig: mocks.getNewsSummaryXConfig,
+}));
+
+vi.mock("@/lib/market-data/gapper-news-sources", () => ({
+  collectGapperNewsSources: mocks.collectGapperNewsSources,
+  createOpenAiWebNewsSearchProvider: mocks.createOpenAiWebNewsSearchProvider,
+  createXNewsSearchProvider: mocks.createXNewsSearchProvider,
 }));
 
 vi.mock("@/lib/market-data/massive", () => ({
@@ -40,7 +53,10 @@ vi.mock("@/lib/market-data/gapper-news-summary", () => ({
 describe("POST /api/gappers/news-summaries", () => {
   beforeEach(() => {
     mocks.batchSummarizeGapperNews.mockReset();
+    mocks.collectGapperNewsSources.mockReset();
     mocks.createOpenAiNewsSummaryProvider.mockReset();
+    mocks.createOpenAiWebNewsSearchProvider.mockReset();
+    mocks.createXNewsSearchProvider.mockReset();
     mocks.getCurrentUser.mockReset();
     mocks.getTickerNews.mockReset();
     mocks.requireUser.mockReset();
@@ -53,6 +69,11 @@ describe("POST /api/gappers/news-summaries", () => {
       model: "gpt-4o-mini",
       provider: "openai",
     });
+    mocks.getNewsSummaryWebSearchConfig.mockReturnValue({
+      enabled: false,
+      provider: "openai",
+    });
+    mocks.getNewsSummaryXConfig.mockReturnValue({ enabled: false });
     mocks.getCurrentUser.mockResolvedValue({
       email: "owner@example.com",
       id: "user-1",
@@ -140,7 +161,7 @@ describe("POST /api/gappers/news-summaries", () => {
     expect(mocks.getTickerNews).not.toHaveBeenCalled();
   });
 
-  it("fetches selected ticker news and returns batch summary results", async () => {
+  it("collects source cascades and returns structured batch summary results", async () => {
     const article = {
       articleUrl: "https://example.com/acme",
       description: "Acme reported earnings.",
@@ -149,10 +170,34 @@ describe("POST /api/gappers/news-summaries", () => {
       tickers: ["ACME"],
       title: "Acme earnings",
     };
+    const source = {
+      id: "massive:article-1",
+      layer: "massive",
+      publishedUtc: "2026-06-04T11:00:00.000Z",
+      publisher: null,
+      snippet: "Acme reported earnings.",
+      title: "Acme earnings",
+      url: "https://example.com/acme",
+    };
     mocks.getTickerNews.mockResolvedValue([article]);
+    mocks.collectGapperNewsSources.mockResolvedValue({
+      layer: "massive",
+      sources: [source],
+    });
     mocks.batchSummarizeGapperNews.mockResolvedValue([
       {
-        rendered: "Adjusted EPS NA / YoY NA / Beat NA",
+        catalysts: [],
+        confidence: "high",
+        earnings: {
+          adjustedEps: { actual: null, estimate: null, priorYear: null },
+          revenue: { actual: null, estimate: null, priorYear: null },
+        },
+        fullYearGuidance: { eps: null, revenue: null },
+        headline: "ACME is gapping up on earnings.",
+        nextQuarterGuidance: { eps: null, revenue: null },
+        notableNews: [],
+        sourceLayer: "massive",
+        sources: [source],
         status: "success",
         symbol: "ACME",
       },
@@ -178,7 +223,18 @@ describe("POST /api/gappers/news-summaries", () => {
     await expect(response.json()).resolves.toEqual({
       results: [
         {
-          rendered: "Adjusted EPS NA / YoY NA / Beat NA",
+          catalysts: [],
+          confidence: "high",
+          earnings: {
+            adjustedEps: { actual: null, estimate: null, priorYear: null },
+            revenue: { actual: null, estimate: null, priorYear: null },
+          },
+          fullYearGuidance: { eps: null, revenue: null },
+          headline: "ACME is gapping up on earnings.",
+          nextQuarterGuidance: { eps: null, revenue: null },
+          notableNews: [],
+          sourceLayer: "massive",
+          sources: [source],
           status: "success",
           symbol: "ACME",
         },
@@ -192,13 +248,21 @@ describe("POST /api/gappers/news-summaries", () => {
       publishedAfter: "2026-06-03T20:00:00.000Z",
       ticker: "ACME",
     });
+    expect(mocks.collectGapperNewsSources).toHaveBeenCalledWith({
+      massiveNews: [article],
+      previousCloseAt: "2026-06-03T20:00:00.000Z",
+      symbol: "ACME",
+      webProvider: null,
+      xProvider: null,
+    });
     expect(mocks.batchSummarizeGapperNews).toHaveBeenCalledWith(
       expect.objectContaining({
         model: "gpt-4o-mini",
         requests: [
           {
-            news: [article],
             previousCloseAt: "2026-06-03T20:00:00.000Z",
+            sourceLayer: "massive",
+            sources: [source],
             symbol: "ACME",
           },
         ],

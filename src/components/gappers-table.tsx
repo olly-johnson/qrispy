@@ -12,6 +12,7 @@ import {
   filterGappersRows,
   getCachedGappersSummaryResults,
   getLastGappersSummaryResults,
+  hasGappersSummaryEarningsOrGuidance,
   saveGappersSummaryResults,
   saveLastGappersSummaryResults,
   serializeGappersFiltersSearchParams,
@@ -345,16 +346,41 @@ export function GappersTable({
                         : "bg-rose-300/10 text-rose-200"
                     }`}
                   >
-                    {result.status === "no_news" ? "no news" : result.status}
+                    {summaryStatusLabel(result)}
                   </span>
                 </div>
-                <pre className="whitespace-pre-wrap font-mono text-xs leading-6 text-zinc-300">
-                  {result.status === "success"
-                    ? result.rendered
-                    : result.status === "no_news"
-                      ? result.message
-                      : result.error}
-                </pre>
+                {result.status === "success" ? (
+                  <div className="grid gap-3">
+                    <p className="text-sm font-medium leading-6 text-zinc-100">
+                      {result.headline}
+                    </p>
+                    {result.catalysts.length > 0 ? (
+                      <div>
+                        <h3 className="text-xs font-semibold uppercase tracking-[0.12em] text-zinc-500">
+                          Catalysts
+                        </h3>
+                        <ul className="mt-2 grid gap-1 text-sm leading-6 text-zinc-300">
+                          {result.catalysts.map((catalyst) => (
+                            <li key={`${result.symbol}-${catalyst.type}-${catalyst.summary}`}>
+                              <span className="text-zinc-100">{catalyst.type}:</span>{" "}
+                              {catalyst.summary}
+                            </li>
+                          ))}
+                        </ul>
+                      </div>
+                    ) : null}
+                    {hasGappersSummaryEarningsOrGuidance(result) ? (
+                      <SummaryEarningsBlock result={result} />
+                    ) : null}
+                    {result.sources.length > 0 ? (
+                      <SummarySources sources={result.sources} />
+                    ) : null}
+                  </div>
+                ) : result.status === "no_news" ? (
+                  <p className="text-sm text-zinc-400">{result.message}</p>
+                ) : (
+                  <p className="text-sm text-rose-200">{result.error}</p>
+                )}
               </article>
             ))}
           </div>
@@ -480,6 +506,86 @@ function Toggle({
   );
 }
 
+function SummarySources({
+  sources,
+}: {
+  sources: Extract<GappersNewsSummaryResult, { status: "success" }>["sources"];
+}) {
+  return (
+    <div className="border-t border-white/10 pt-3 text-xs leading-5 text-zinc-500">
+      {sources.map((source) => (
+        <div key={source.id}>
+          {source.url ? (
+            <a
+              className="hover:text-zinc-300"
+              href={source.url}
+              rel="noreferrer"
+              target="_blank"
+            >
+              {source.publisher ? `${source.publisher}: ` : ""}
+              {source.title}
+            </a>
+          ) : (
+            <span>
+              {source.publisher ? `${source.publisher}: ` : ""}
+              {source.title}
+            </span>
+          )}
+          {source.publishedUtc ? ` - ${formatDateTime(source.publishedUtc)}` : ""}
+        </div>
+      ))}
+    </div>
+  );
+}
+
+function SummaryEarningsBlock({
+  result,
+}: {
+  result: Extract<GappersNewsSummaryResult, { status: "success" }>;
+}) {
+  const rows = [
+    result.earnings.adjustedEps.actual != null
+      ? `Adjusted EPS ${formatSummaryCurrency(result.earnings.adjustedEps.actual, 2)}`
+      : null,
+    result.earnings.revenue.actual != null
+      ? `Revenue ${formatSummaryLargeCurrency(result.earnings.revenue.actual)}`
+      : null,
+    result.nextQuarterGuidance.eps
+      ? `Next quarter EPS ${result.nextQuarterGuidance.eps}`
+      : null,
+    result.nextQuarterGuidance.revenue
+      ? `Next quarter revenue ${result.nextQuarterGuidance.revenue}`
+      : null,
+    result.fullYearGuidance.eps
+      ? `Full year EPS ${result.fullYearGuidance.eps}`
+      : null,
+    result.fullYearGuidance.revenue
+      ? `Full year revenue ${result.fullYearGuidance.revenue}`
+      : null,
+  ].filter((row): row is string => row != null);
+
+  return (
+    <div>
+      <h3 className="text-xs font-semibold uppercase tracking-[0.12em] text-zinc-500">
+        Earnings / Guidance
+      </h3>
+      <ul className="mt-2 grid gap-1 text-sm leading-6 text-zinc-300">
+        {rows.map((row) => (
+          <li key={row}>{row}</li>
+        ))}
+      </ul>
+    </div>
+  );
+}
+
+function summaryStatusLabel(result: GappersNewsSummaryResult) {
+  if (result.status === "success") {
+    return `${result.sourceLayer} / ${result.confidence}`;
+  }
+
+  return result.status === "no_news" ? "no news" : "error";
+}
+
 function formatCompact(value: number) {
   return new Intl.NumberFormat("en-US", {
     maximumFractionDigits: 1,
@@ -501,5 +607,32 @@ function formatPrice(value: number) {
     maximumFractionDigits: 2,
     minimumFractionDigits: 2,
     style: "currency",
+  }).format(value);
+}
+
+function formatSummaryCurrency(value: number, decimals: number) {
+  return new Intl.NumberFormat("en-US", {
+    currency: "USD",
+    maximumFractionDigits: decimals,
+    minimumFractionDigits: decimals,
+    style: "currency",
+  }).format(value);
+}
+
+function formatSummaryLargeCurrency(value: number) {
+  if (Math.abs(value) >= 1_000_000_000) {
+    return `$${trimSummaryNumber(value / 1_000_000_000)}B`;
+  }
+  if (Math.abs(value) >= 1_000_000) {
+    return `$${trimSummaryNumber(value / 1_000_000)}M`;
+  }
+
+  return formatSummaryCurrency(value, 0);
+}
+
+function trimSummaryNumber(value: number) {
+  return new Intl.NumberFormat("en-US", {
+    maximumFractionDigits: 2,
+    minimumFractionDigits: 0,
   }).format(value);
 }
