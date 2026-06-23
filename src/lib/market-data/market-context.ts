@@ -250,7 +250,22 @@ function toStoredBrief(brief: MarketContextBrief) {
 }
 
 function arrayOf(value: unknown) { return Array.isArray(value) ? value : []; }
-function errorMessage(error: unknown) { return error instanceof Error ? error.message : String(error); }
+function errorMessage(error: unknown) {
+  if (error instanceof Error) {
+    return error.message;
+  }
+
+  if (
+    typeof error === "object" &&
+    error != null &&
+    "message" in error &&
+    typeof error.message === "string"
+  ) {
+    return error.message;
+  }
+
+  return String(error);
+}
 
 function easternDate(now: Date): UsEquityCalendarDate {
   const values = new Intl.DateTimeFormat("en-US", {

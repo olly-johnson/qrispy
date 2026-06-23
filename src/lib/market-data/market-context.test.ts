@@ -45,7 +45,13 @@ describe("loadMarketContextBrief", () => {
         select: () => ({
           lte: () => ({
             order: () => ({
-              limit: async () => ({ data: null, error: new Error("relation does not exist") }),
+              limit: async () => ({
+                data: null,
+                error: {
+                  code: "PGRST205",
+                  message: "Could not find the table 'public.market_daily_briefs' in the schema cache",
+                },
+              }),
             }),
           }),
         }),
@@ -60,7 +66,7 @@ describe("loadMarketContextBrief", () => {
       }),
     ).resolves.toMatchObject({
       brief: null,
-      error: "relation does not exist",
+      error: "Could not find the table 'public.market_daily_briefs' in the schema cache",
       isStale: false,
     });
   });
