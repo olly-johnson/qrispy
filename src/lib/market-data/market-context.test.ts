@@ -39,6 +39,32 @@ describe("marketContextWindow", () => {
 });
 
 describe("loadMarketContextBrief", () => {
+  it("returns an unavailable state when the market brief table is not yet available", async () => {
+    const client = {
+      from: () => ({
+        select: () => ({
+          lte: () => ({
+            order: () => ({
+              limit: async () => ({ data: null, error: new Error("relation does not exist") }),
+            }),
+          }),
+        }),
+      }),
+    };
+
+    await expect(
+      loadMarketContextBrief({
+        client,
+        now: new Date("2026-06-23T11:00:00.000Z"),
+        provider: null,
+      }),
+    ).resolves.toMatchObject({
+      brief: null,
+      error: "relation does not exist",
+      isStale: false,
+    });
+  });
+
   it("returns an unavailable state when Supabase is not configured", async () => {
     await expect(
       loadMarketContextBrief({

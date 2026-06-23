@@ -76,7 +76,17 @@ export async function loadMarketContextBrief(input: {
     };
   }
   const client = input.client as MarketContextClient;
-  const existing = await readLatestBrief(client, window.tradingDate);
+  let existing: MarketContextBrief | null;
+  try {
+    existing = await readLatestBrief(client, window.tradingDate);
+  } catch (error) {
+    return {
+      brief: null,
+      canRefresh: window.canRefresh,
+      error: errorMessage(error),
+      isStale: false,
+    };
+  }
 
   if (!window.shouldGenerateToday || existing?.marketDate === window.tradingDate) {
     return { brief: existing, canRefresh: window.canRefresh, error: null, isStale: false };
