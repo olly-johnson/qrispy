@@ -330,3 +330,34 @@ describe("Trade review groups migration", () => {
     }
   });
 });
+
+describe("Market daily briefs migration", () => {
+  it("stores one authenticated-readable shared brief per market date", () => {
+    const migrationName = readdirSync(
+      join(process.cwd(), "supabase", "migrations"),
+    ).find((name) => name.endsWith("_add_market_daily_briefs.sql"));
+    expect(migrationName).toBeDefined();
+
+    const sql = readFileSync(
+      join(process.cwd(), "supabase", "migrations", migrationName!),
+      "utf8",
+    );
+
+    expect(sql).toContain("create table public.market_daily_briefs");
+    expect(sql).toContain("market_date date primary key");
+    expect(sql).toContain("notable_news jsonb not null");
+    expect(sql).toContain("events jsonb not null");
+    expect(sql).toContain("sources jsonb not null");
+    expect(sql).toContain(
+      "alter table public.market_daily_briefs enable row level security",
+    );
+    expect(sql).toContain(
+      "grant select on table public.market_daily_briefs to authenticated",
+    );
+    expect(sql).toContain(
+      "grant select, insert, update, delete on table public.market_daily_briefs to service_role",
+    );
+    expect(sql).toContain("authenticated can select market daily briefs");
+    expect(sql).toContain("using (true)");
+  });
+});

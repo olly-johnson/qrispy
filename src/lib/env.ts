@@ -114,6 +114,19 @@ export function getNewsSummaryLlmConfig(): NewsSummaryLlmConfig | null {
   };
 }
 
+export function getMarketContextConfig() {
+  const apiKey = process.env.OPENAI_API_KEY;
+
+  if (!apiKey) {
+    return null;
+  }
+
+  return {
+    apiKey,
+    model: process.env.NEWS_SUMMARY_LLM_MODEL ?? "gpt-4o-mini",
+  };
+}
+
 export function getNewsSummaryWebSearchConfig(): NewsSummaryWebSearchConfig {
   const enabled =
     (process.env.NEWS_SUMMARY_WEB_SEARCH_ENABLED ?? "false").toLowerCase() ===

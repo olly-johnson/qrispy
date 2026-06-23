@@ -1,10 +1,30 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import {
+  getMarketContextConfig,
   getNewsSummaryLlmConfig,
   getNewsSummaryWebSearchConfig,
   getNewsSummaryXConfig,
 } from "./env";
+
+describe("getMarketContextConfig", () => {
+  afterEach(() => {
+    vi.unstubAllEnvs();
+  });
+
+  it("uses the existing OpenAI key and default model", () => {
+    vi.stubEnv("OPENAI_API_KEY", "openai-key");
+    expect(getMarketContextConfig()).toEqual({
+      apiKey: "openai-key",
+      model: "gpt-4o-mini",
+    });
+  });
+
+  it("returns null when OpenAI is not configured", () => {
+    vi.stubEnv("OPENAI_API_KEY", "");
+    expect(getMarketContextConfig()).toBeNull();
+  });
+});
 
 describe("getNewsSummaryLlmConfig", () => {
   afterEach(() => {
