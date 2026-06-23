@@ -1,6 +1,7 @@
 import { describe, expect, it, vi } from "vitest";
 
 import {
+  createOpenAiMarketContextProvider,
   loadMarketContextBrief,
   marketContextWindow,
   refreshMarketContextBrief,
@@ -87,6 +88,114 @@ describe("refreshMarketContextBrief", () => {
   });
 });
 
+describe("createOpenAiMarketContextProvider", () => {
+  it("searches market-wide sources before extracting a sourced brief", async () => {
+    const fetcher = vi
+      .fn()
+      .mockResolvedValueOnce(
+        response({
+          output: [
+            {
+              content: [
+                {
+                  annotations: [
+                    { title: "CPI release", url: "https://bls.gov/cpi" },
+                    { title: "Fed calendar", url: "https://federalreserve.gov/calendar" },
+                  ],
+                  text: "CPI and the Fed meeting are the key market events.",
+                },
+              ],
+            },
+          ],
+        }),
+      )
+      .mockResolvedValueOnce(
+        response({
+          output_text: JSON.stringify({
+            events: [
+              {
+                category: "inflation",
+                kind: "scheduled",
+                sourceIds: ["web:0"],
+                summary: "CPI data is due before the open.",
+                timeEt: "8:30 AM ET",
+              },
+            ],
+            headline: "Inflation data is the market's main focus today.",
+            notableNews: [],
+          }),
+        }),
+      );
+    const provider = createOpenAiMarketContextProvider({
+      apiKey: "openai-key",
+      fetcher,
+      model: "gpt-4o-mini",
+    });
+
+    await expect(provider.generate({ marketDate: "2026-06-23" })).resolves.toEqual({
+      events: [
+        {
+          category: "inflation",
+          kind: "scheduled",
+          sourceIds: ["web:0"],
+          summary: "CPI data is due before the open.",
+          timeEt: "8:30 AM ET",
+        },
+      ],
+      headline: "Inflation data is the market's main focus today.",
+      notableNews: [],
+      sources: [
+        {
+          id: "web:0",
+          publisher: "bls.gov",
+          title: "CPI release",
+          url: "https://bls.gov/cpi",
+        },
+      ],
+    });
+
+    expect(fetcher).toHaveBeenCalledTimes(2);
+    expect(JSON.parse(fetcher.mock.calls[0]?.[1]?.body as string)).toMatchObject({
+      model: "gpt-4o-mini",
+      tools: [{ type: "web_search" }],
+    });
+    expect(String(fetcher.mock.calls[0]?.[1]?.body)).toContain("2026-06-23");
+    expect(String(fetcher.mock.calls[1]?.[1]?.body)).toContain("web:0");
+  });
+
+  it("rejects extracted items that cite unknown sources", async () => {
+    const fetcher = vi
+      .fn()
+      .mockResolvedValueOnce(
+        response({
+          output: [{ content: [{ annotations: [{ title: "CPI", url: "https://bls.gov/cpi" }] }] }],
+        }),
+      )
+      .mockResolvedValueOnce(
+        response({
+          output_text: JSON.stringify({
+            events: [],
+            headline: "Unverified headline",
+            notableNews: [
+              {
+                category: "macro",
+                kind: "developing",
+                sourceIds: ["web:99"],
+                summary: "Unverified item",
+                timeEt: null,
+              },
+            ],
+          }),
+        }),
+      );
+
+    await expect(
+      createOpenAiMarketContextProvider({ apiKey: "openai-key", fetcher, model: "gpt-4o-mini" })
+        .generate({ marketDate: "2026-06-23" }),
+    ).rejects.toThrow("no source-backed market context");
+  });
+});
+
 function storedBrief(market_date: string) {
   return {
     events: [],
@@ -115,4 +224,8 @@ function fakeClient(rows: Record<string, unknown>[]) {
     }),
     upserts,
   };
+}
+
+function response(payload: unknown) {
+  return { json: async () => payload, ok: true, status: 200 };
 }

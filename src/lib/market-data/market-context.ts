@@ -144,6 +144,58 @@ export async function refreshMarketContextBrief(input: {
   }
 }
 
+export function createOpenAiMarketContextProvider(input: {
+  apiKey: string;
+  fetcher?: typeof fetch;
+  model: string;
+}): MarketContextProvider {
+  const fetcher = input.fetcher ?? fetch;
+
+  return {
+    async generate({ marketDate }) {
+      const discovery = await fetcher("https://api.openai.com/v1/responses", {
+        body: JSON.stringify({
+          input: `Find material US stock-market and world-news context affecting markets on ${marketDate}. Include macro releases, Fed decisions, inflation, elections, index changes, and options-expiry effects. Return concise, current sources.`,
+          model: input.model,
+          tools: [{ type: "web_search" }],
+        }),
+        headers: { authorization: `Bearer ${input.apiKey}`, "content-type": "application/json" },
+        method: "POST",
+      });
+      if (!discovery.ok) throw new Error(`OpenAI market search failed with ${discovery.status}`);
+      const sources = marketSourcesFromResponse(await discovery.json());
+      if (sources.length === 0) throw new Error("no source-backed market context found");
+
+      const extraction = await fetcher("https://api.openai.com/v1/responses", {
+        body: JSON.stringify({
+          input: `Extract a compact market brief for ${marketDate} from these sources only: ${JSON.stringify(sources)}. Return JSON with headline, notableNews, and events. Each item requires category, kind (scheduled or developing), summary, timeEt (string or null), and sourceIds containing source ids from the supplied sources. Do not invent facts or times.`,
+          model: input.model,
+          text: { format: { name: "market_context_brief", type: "json_object" } },
+        }),
+        headers: { authorization: `Bearer ${input.apiKey}`, "content-type": "application/json" },
+        method: "POST",
+      });
+      if (!extraction.ok) throw new Error(`OpenAI market extraction failed with ${extraction.status}`);
+      const extracted = parseMarketContext(await extraction.json());
+      const sourceIds = new Set(sources.map((source) => source.id));
+      const items = (rows: unknown) => arrayOf(rows)
+        .filter(isMarketContextItem)
+        .filter((item) => item.sourceIds.length > 0 && item.sourceIds.every((id) => sourceIds.has(id)))
+        .slice(0, 5);
+      const notableNews = items(extracted.notableNews);
+      const events = items(extracted.events);
+      if (notableNews.length + events.length === 0) throw new Error("no source-backed market context found");
+      const used = new Set([...notableNews, ...events].flatMap((item) => item.sourceIds));
+      return {
+        events,
+        headline: typeof extracted.headline === "string" ? extracted.headline : "Market context is developing.",
+        notableNews,
+        sources: sources.filter((source) => used.has(source.id)),
+      };
+    },
+  };
+}
+
 async function readLatestBrief(client: MarketContextClient, marketDate: string) {
   const { data, error } = await client
     .from("market_daily_briefs")
@@ -210,3 +262,25 @@ function previousTradingDate(date: UsEquityCalendarDate) {
 function formatDate(date: UsEquityCalendarDate) {
   return `${date.year}-${String(date.month).padStart(2, "0")}-${String(date.day).padStart(2, "0")}`;
 }
+
+function marketSourcesFromResponse(payload: unknown): MarketContextSource[] {
+  const output = (payload as { output?: Array<{ content?: Array<{ annotations?: Array<{ title?: string; url?: string }> }> }> }).output ?? [];
+  return output.flatMap((row) => row.content ?? []).flatMap((content) => content.annotations ?? [])
+    .filter((annotation): annotation is { title: string; url: string } => typeof annotation.title === "string" && isHttpUrl(annotation.url))
+    .map((annotation, index) => ({ id: `web:${index}`, publisher: publisherFromUrl(annotation.url), title: annotation.title, url: annotation.url }));
+}
+
+function parseMarketContext(payload: unknown) {
+  const row = payload as { output_text?: string; output?: Array<{ content?: Array<{ text?: string }> }> };
+  const text = row.output_text ?? row.output?.flatMap((item) => item.content ?? []).map((item) => item.text).find(Boolean);
+  if (!text) throw new Error("OpenAI market extraction did not include text output");
+  return JSON.parse(text) as Record<string, unknown>;
+}
+
+function isMarketContextItem(value: unknown): value is MarketContextItem {
+  const row = value as Partial<MarketContextItem>;
+  return typeof row.category === "string" && (row.kind === "developing" || row.kind === "scheduled") && typeof row.summary === "string" && Array.isArray(row.sourceIds) && row.sourceIds.every((id) => typeof id === "string") && (row.timeEt == null || typeof row.timeEt === "string");
+}
+
+function isHttpUrl(value: unknown): value is string { try { return typeof value === "string" && ["http:", "https:"].includes(new URL(value).protocol); } catch { return false; } }
+function publisherFromUrl(url: string) { return new URL(url).hostname.replace(/^www\./, ""); }
