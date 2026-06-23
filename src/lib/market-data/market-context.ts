@@ -67,6 +67,14 @@ export async function loadMarketContextBrief(input: {
 }): Promise<MarketContextLoadResult> {
   const now = input.now ?? new Date();
   const window = marketContextWindow(now);
+  if (!input.client) {
+    return {
+      brief: null,
+      canRefresh: window.canRefresh,
+      error: "Supabase service role is not configured for market context.",
+      isStale: false,
+    };
+  }
   const client = input.client as MarketContextClient;
   const existing = await readLatestBrief(client, window.tradingDate);
 

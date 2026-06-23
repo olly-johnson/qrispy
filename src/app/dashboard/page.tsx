@@ -3,6 +3,7 @@ import type { ReactNode } from "react";
 
 import { AppShell } from "@/components/app-shell";
 import { formatDateTime, formatMoney, formatPercent } from "@/components/format";
+import { MarketContextCard } from "@/components/market-context-card";
 import { MetricCard, ProvenanceIcon } from "@/components/metric-card";
 import { SyncButton } from "@/components/sync-button";
 import { requireUser } from "@/lib/auth/session";
@@ -17,6 +18,12 @@ import {
 } from "@/lib/market-data/breadth";
 import { createMassiveMarketDataProvider } from "@/lib/market-data/massive";
 import {
+  createOpenAiMarketContextProvider,
+  loadMarketContextBrief,
+} from "@/lib/market-data/market-context";
+import { getMarketContextConfig } from "@/lib/env";
+import { createSupabaseAdminClient } from "@/lib/supabase/server";
+import {
   dashboardOpenPositions,
   dashboardPositionTradeHref,
   dashboardPositionUnrealizedValue,
@@ -27,9 +34,10 @@ export const dynamic = "force-dynamic";
 
 export default async function DashboardPage() {
   const user = await requireUser();
-  const [data, breadth] = await Promise.all([
+  const [data, breadth, marketContext] = await Promise.all([
     getDashboardData(user.id),
     loadDashboardBreadth(),
+    loadDashboardMarketContext(),
   ]);
   const { metrics } = data.summary;
   const latestJob = data.jobs[0];
@@ -50,6 +58,8 @@ export default async function DashboardPage() {
         </div>
         <SyncButton />
       </div>
+
+      <MarketContextCard result={marketContext} variant="dashboard" />
 
       {!data.hasData ? (
         <section className="mt-6 rounded-md border border-amber-300/20 bg-amber-300/[0.08] p-4 text-sm text-amber-100">
@@ -123,6 +133,15 @@ export default async function DashboardPage() {
       </div>
     </AppShell>
   );
+}
+
+async function loadDashboardMarketContext() {
+  const config = getMarketContextConfig();
+  const client = createSupabaseAdminClient();
+  return loadMarketContextBrief({
+    client,
+    provider: config ? createOpenAiMarketContextProvider(config) : null,
+  });
 }
 
 function DashboardExpectancyCard({

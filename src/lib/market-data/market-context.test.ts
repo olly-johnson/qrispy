@@ -39,6 +39,19 @@ describe("marketContextWindow", () => {
 });
 
 describe("loadMarketContextBrief", () => {
+  it("returns an unavailable state when Supabase is not configured", async () => {
+    await expect(
+      loadMarketContextBrief({
+        client: null,
+        now: new Date("2026-06-23T11:00:00.000Z"),
+        provider: null,
+      }),
+    ).resolves.toMatchObject({
+      brief: null,
+      error: "Supabase service role is not configured for market context.",
+    });
+  });
+
   it("uses the prior stored brief when generation fails", async () => {
     const provider: MarketContextProvider = {
       generate: vi.fn().mockRejectedValue(new Error("OpenAI unavailable")),
