@@ -1,4 +1,7 @@
-import type { MassiveNewsArticle } from "./massive";
+import type {
+  GapperNewsSourceLayer,
+  NormalizedGapperNewsSource,
+} from "./gapper-news-sources";
 
 export type NewsSummaryProviderId = "openai";
 
@@ -7,8 +10,11 @@ export type NewsSummaryModelSelection = {
   provider: NewsSummaryProviderId;
 };
 
+export type NewsSummaryConfidence = "high" | "low" | "medium";
+
 export type ExtractedGapperNews = {
   catalysts: Array<{ sourceIds: string[]; summary: string; type: string }>;
+  confidence: NewsSummaryConfidence;
   earnings: {
     adjustedEps: {
       actual: number | null;
@@ -22,6 +28,7 @@ export type ExtractedGapperNews = {
     };
   };
   fullYearGuidance: { eps: string | null; revenue: string | null };
+  headline: string;
   nextQuarterGuidance: { eps: string | null; revenue: string | null };
   notableNews: string[];
 };
@@ -29,16 +36,27 @@ export type ExtractedGapperNews = {
 export type NewsSummaryProvider = {
   extract(input: {
     model: string;
-    news: MassiveNewsArticle[];
     previousCloseAt: string;
+    sourceLayer: GapperNewsSourceLayer;
+    sources: NormalizedGapperNewsSource[];
     symbol: string;
   }): Promise<ExtractedGapperNews>;
 };
 
 export type NewsSummaryResult =
-  | { rendered: string; status: "success"; symbol: string }
-  | { message: string; status: "no_news"; symbol: string }
-  | { error: string; status: "error"; symbol: string };
+  | (ExtractedGapperNews & {
+      sourceLayer: Exclude<GapperNewsSourceLayer, "none">;
+      sources: NormalizedGapperNewsSource[];
+      status: "success";
+      symbol: string;
+    })
+  | { message: string; sourceLayer: "none"; status: "no_news"; symbol: string }
+  | {
+      error: string;
+      sourceLayer: GapperNewsSourceLayer;
+      status: "error";
+      symbol: string;
+    };
 
 const SUPPORTED_MODELS = {
   openai: ["gpt-4o-mini", "gpt-4o-2024-08-06"],
@@ -85,40 +103,37 @@ export async function batchSummarizeGapperNews({
   model?: string;
   provider: NewsSummaryProvider;
   requests: Array<{
-    news: MassiveNewsArticle[];
     previousCloseAt: string;
+    sourceLayer: GapperNewsSourceLayer;
+    sources: NormalizedGapperNewsSource[];
     symbol: string;
   }>;
 }): Promise<NewsSummaryResult[]> {
   return Promise.all(
     requests.map(async (request) => {
-      try {
-        if (request.news.length === 0) {
-          return {
-            message: "No Massive news found after previous close.",
-            status: "no_news" as const,
-            symbol: request.symbol,
-          };
-        }
+      if (request.sourceLayer === "none") {
+        return {
+          message: "No Massive, web, or X context found after previous close.",
+          sourceLayer: "none" as const,
+          status: "no_news" as const,
+          symbol: request.symbol,
+        };
+      }
 
+      try {
         const extracted = await provider.extract({ ...request, model });
 
         return {
-          rendered: renderGapperNewsSummary({
-            ...extracted,
-            sources: request.news.map((article) => ({
-              id: article.id,
-              publishedUtc: article.publishedUtc,
-              title: article.title,
-              url: article.articleUrl,
-            })),
-          }),
+          ...extracted,
+          sourceLayer: request.sourceLayer,
+          sources: request.sources,
           status: "success" as const,
           symbol: request.symbol,
         };
       } catch (error) {
         return {
           error: error instanceof Error ? error.message : String(error),
+          sourceLayer: request.sourceLayer,
           status: "error" as const,
           symbol: request.symbol,
         };
@@ -144,13 +159,18 @@ export function createOpenAiNewsSummaryProvider({
                 {
                   text: [
                     "Extract market-moving news catalysts as JSON.",
-                    "Use only the supplied news articles.",
+                    "Return a one-sentence headline answering why the stock is gapping today.",
+                    "Return one to three material catalysts.",
+                    "Use only the supplied sources.",
                     "Do not infer missing numbers.",
                     "Return null for unavailable numeric or guidance fields.",
                     "Guidance fields must be YoY percentage strings only; return null when guidance is only given as absolute EPS or revenue values.",
+                    "Use confidence to express uncertainty instead of inventing facts.",
+                    "When sourceLayer is x, treat X posts as social context unless they link to credible sources.",
                     `Symbol: ${input.symbol}`,
                     `Previous close cutoff: ${input.previousCloseAt}`,
-                    `Articles: ${JSON.stringify(input.news)}`,
+                    `Source layer: ${input.sourceLayer}`,
+                    `Sources: ${JSON.stringify(input.sources)}`,
                   ].join("\n"),
                   type: "input_text",
                 },
@@ -181,8 +201,7 @@ export function createOpenAiNewsSummaryProvider({
         );
       }
 
-      const payload = await response.json();
-      const outputText = extractOpenAiResponseText(payload);
+      const outputText = extractOpenAiResponseText(await response.json());
 
       if (!outputText) {
         throw new Error("OpenAI news summary response did not include text output");
@@ -191,48 +210,6 @@ export function createOpenAiNewsSummaryProvider({
       return JSON.parse(outputText) as ExtractedGapperNews;
     },
   };
-}
-
-export function renderGapperNewsSummary(
-  extracted: ExtractedGapperNews & {
-    sources: Array<{
-      id: string;
-      publishedUtc: string;
-      title: string;
-      url: string | null;
-    }>;
-  },
-) {
-  const eps = extracted.earnings.adjustedEps;
-  const revenue = extracted.earnings.revenue;
-  const notableNews =
-    extracted.notableNews.length > 0 ? extracted.notableNews.join(" ") : "NA";
-  const catalysts =
-    extracted.catalysts.length > 0
-      ? extracted.catalysts
-          .map((item) => `- ${item.type}: ${item.summary}`)
-          .join("\n")
-      : "- NA";
-  const sources =
-    extracted.sources.length > 0
-      ? extracted.sources
-          .map((source) =>
-            `- ${source.title} (${source.publishedUtc}) ${source.url ?? ""}`.trim(),
-          )
-          .join("\n")
-      : "- NA";
-
-  return [
-    `Adjusted EPS ${formatCurrency(eps.actual, 2)} / YoY ${formatPercent(calculateChangePercent(eps.actual, eps.priorYear))} / Beat ${formatPercent(calculateChangePercent(eps.actual, eps.estimate))}`,
-    `Rev ${formatLargeCurrency(revenue.actual)} / YoY ${formatPercent(calculateChangePercent(revenue.actual, revenue.priorYear))} / Beat ${formatPercent(calculateChangePercent(revenue.actual, revenue.estimate))}`,
-    `Guidance Next Quarter: EPS YoY ${extracted.nextQuarterGuidance.eps ?? "NA"} / Rev YoY ${extracted.nextQuarterGuidance.revenue ?? "NA"}`,
-    `Full year guidance: EPS YoY ${extracted.fullYearGuidance.eps ?? "NA"} / Rev YoY ${extracted.fullYearGuidance.revenue ?? "NA"}`,
-    `Notable News: ${notableNews}`,
-    "Other Catalysts:",
-    catalysts,
-    "Sources:",
-    sources,
-  ].join("\n");
 }
 
 const nullableNumber = { anyOf: [{ type: "number" }, { type: "null" }] };
@@ -254,6 +231,7 @@ const NEWS_SUMMARY_JSON_SCHEMA = {
       },
       type: "array",
     },
+    confidence: { enum: ["high", "medium", "low"], type: "string" },
     earnings: {
       additionalProperties: false,
       properties: {
@@ -264,13 +242,16 @@ const NEWS_SUMMARY_JSON_SCHEMA = {
       type: "object",
     },
     fullYearGuidance: guidanceSchema(),
+    headline: { type: "string" },
     nextQuarterGuidance: guidanceSchema(),
     notableNews: { items: { type: "string" }, type: "array" },
   },
   required: [
     "catalysts",
+    "confidence",
     "earnings",
     "fullYearGuidance",
+    "headline",
     "nextQuarterGuidance",
     "notableNews",
   ],
@@ -316,54 +297,4 @@ function extractOpenAiResponseText(payload: unknown) {
     ?.flatMap((item) => item.content ?? [])
     .map((content) => content.text)
     .find((text): text is string => typeof text === "string" && text.length > 0);
-}
-
-function formatCurrency(value: number | null, decimals: number) {
-  if (value == null) {
-    return "NA";
-  }
-
-  return new Intl.NumberFormat("en-US", {
-    currency: "USD",
-    maximumFractionDigits: decimals,
-    minimumFractionDigits: decimals,
-    style: "currency",
-  }).format(value);
-}
-
-function formatLargeCurrency(value: number | null) {
-  if (value == null) {
-    return "NA";
-  }
-
-  if (Math.abs(value) >= 1_000_000_000) {
-    return `$${trimCompactNumber(value / 1_000_000_000)}B`;
-  }
-  if (Math.abs(value) >= 1_000_000) {
-    return `$${trimCompactNumber(value / 1_000_000)}M`;
-  }
-
-  return formatCurrency(value, 0);
-}
-
-function formatPercent(value: number | null) {
-  if (value == null) {
-    return "NA";
-  }
-
-  return `${trimFixedNumber(value)}%`;
-}
-
-function trimFixedNumber(value: number) {
-  return new Intl.NumberFormat("en-US", {
-    maximumFractionDigits: 2,
-    minimumFractionDigits: 2,
-  }).format(value);
-}
-
-function trimCompactNumber(value: number) {
-  return new Intl.NumberFormat("en-US", {
-    maximumFractionDigits: 2,
-    minimumFractionDigits: 0,
-  }).format(value);
 }
