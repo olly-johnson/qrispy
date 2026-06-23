@@ -348,4 +348,3 @@ gh pr create --draft --base main --head codex/market-context-brief --title "Add 
 ~~~
 
 Attach the Task 5 screenshot and list npm test, npm run lint, and npm run build in the PR verification notes. Then run gh pr checks --watch; every required check must pass before requesting review.
-
