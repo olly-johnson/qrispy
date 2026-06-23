@@ -1,10 +1,19 @@
 import { getCurrentUser } from "@/lib/auth/session";
-import { getNewsSummaryLlmConfig } from "@/lib/env";
+import {
+  getNewsSummaryLlmConfig,
+  getNewsSummaryWebSearchConfig,
+  getNewsSummaryXConfig,
+} from "@/lib/env";
 import {
   batchSummarizeGapperNews,
   createOpenAiNewsSummaryProvider,
   resolveNewsSummaryModel,
 } from "@/lib/market-data/gapper-news-summary";
+import {
+  collectGapperNewsSources,
+  createOpenAiWebNewsSearchProvider,
+  createXNewsSearchProvider,
+} from "@/lib/market-data/gapper-news-sources";
 import { createMassiveMarketDataProvider } from "@/lib/market-data/massive";
 
 export const dynamic = "force-dynamic";
@@ -62,17 +71,35 @@ export async function POST(request: Request) {
     );
   }
 
+  const webConfig = getNewsSummaryWebSearchConfig();
+  const xConfig = getNewsSummaryXConfig();
+  const webProvider = webConfig.enabled
+    ? createOpenAiWebNewsSearchProvider({ apiKey: webConfig.apiKey })
+    : null;
+  const xProvider = xConfig.enabled
+    ? createXNewsSearchProvider({ bearerToken: xConfig.bearerToken })
+    : null;
+
   try {
     const requests = await Promise.all(
       tickers.map(async (ticker) => {
         const symbol = ticker.symbol.toUpperCase();
+        const massiveNews = await massive.getTickerNews({
+          publishedAfter: ticker.previousCloseAt,
+          ticker: symbol,
+        });
+        const collected = await collectGapperNewsSources({
+          massiveNews,
+          previousCloseAt: ticker.previousCloseAt,
+          symbol,
+          webProvider,
+          xProvider,
+        });
 
         return {
-          news: await massive.getTickerNews({
-            publishedAfter: ticker.previousCloseAt,
-            ticker: symbol,
-          }),
           previousCloseAt: ticker.previousCloseAt,
+          sourceLayer: collected.layer,
+          sources: collected.sources,
           symbol,
         };
       }),
