@@ -7,9 +7,49 @@ export type GappersSummaryRequest = {
 };
 
 export type GappersNewsSummaryResult =
-  | { rendered: string; status: "success"; symbol: string }
-  | { message: string; status: "no_news"; symbol: string }
-  | { error: string; status: "error"; symbol: string };
+  | {
+      catalysts: Array<{
+        sourceIds?: string[];
+        summary: string;
+        type: string;
+      }>;
+      confidence: "high" | "low" | "medium";
+      earnings: {
+        adjustedEps: GappersNewsSummaryMetric;
+        revenue: GappersNewsSummaryMetric;
+      };
+      fullYearGuidance: { eps: string | null; revenue: string | null };
+      headline: string;
+      nextQuarterGuidance: { eps: string | null; revenue: string | null };
+      notableNews: string[];
+      sourceLayer: "massive" | "web" | "x";
+      sources: GappersNewsSummarySource[];
+      status: "success";
+      symbol: string;
+    }
+  | { message: string; sourceLayer: "none"; status: "no_news"; symbol: string }
+  | {
+      error: string;
+      sourceLayer: "massive" | "none" | "web" | "x";
+      status: "error";
+      symbol: string;
+    };
+
+export type GappersNewsSummarySource = {
+  id: string;
+  layer: "massive" | "web" | "x";
+  publishedUtc: string | null;
+  publisher: string | null;
+  snippet: string | null;
+  title: string;
+  url: string | null;
+};
+
+export type GappersNewsSummaryMetric = {
+  actual: number | null;
+  estimate: number | null;
+  priorYear: number | null;
+};
 
 export type GappersFilters = {
   includeEtfs: boolean;
@@ -154,7 +194,8 @@ type LastSummaryResultsPayload = {
   savedAt: number;
 };
 
-const SUMMARY_CACHE_KEY_PREFIX = "qrispy:gapper-news-summary:";
+const SUMMARY_CACHE_NAMESPACE = "qrispy:gapper-news-summary:";
+const SUMMARY_CACHE_KEY_PREFIX = `${SUMMARY_CACHE_NAMESPACE}v2:`;
 const LAST_SUMMARY_RESULTS_KEY = `${SUMMARY_CACHE_KEY_PREFIX}last-results`;
 const EASTERN_TIME_ZONE = "America/New_York";
 
@@ -291,11 +332,28 @@ export function clearGappersNewsSummaryCache({
 }) {
   const keys = Array.from({ length: storage.length }, (_, index) => storage.key(index))
     .filter((key): key is string => key != null)
-    .filter((key) => key.startsWith(SUMMARY_CACHE_KEY_PREFIX));
+    .filter((key) => key.startsWith(SUMMARY_CACHE_NAMESPACE));
 
   for (const key of keys) {
     storage.removeItem(key);
   }
+}
+
+export function hasGappersSummaryEarningsOrGuidance(
+  result: Extract<GappersNewsSummaryResult, { status: "success" }>,
+) {
+  return [
+    result.earnings.adjustedEps.actual,
+    result.earnings.adjustedEps.estimate,
+    result.earnings.adjustedEps.priorYear,
+    result.earnings.revenue.actual,
+    result.earnings.revenue.estimate,
+    result.earnings.revenue.priorYear,
+    result.nextQuarterGuidance.eps,
+    result.nextQuarterGuidance.revenue,
+    result.fullYearGuidance.eps,
+    result.fullYearGuidance.revenue,
+  ].some((value) => value != null && value !== "");
 }
 
 function buildGappersSummaryCacheKey({

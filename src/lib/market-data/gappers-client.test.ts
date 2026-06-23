@@ -4,6 +4,7 @@ import {
   buildGappersSummaryRequests,
   clearGappersNewsSummaryCache,
   getCachedGappersSummaryResults,
+  hasGappersSummaryEarningsOrGuidance,
   getLastGappersSummaryResults,
   DEFAULT_GAPPERS_FILTERS,
   filterGappersRows,
@@ -12,6 +13,7 @@ import {
   saveGappersSummaryResults,
   serializeGappersFiltersSearchParams,
 } from "./gappers-client";
+import type { GappersNewsSummaryResult } from "./gappers-client";
 import type { GappersRow } from "./gappers";
 
 describe("filterGappersRows", () => {
@@ -102,6 +104,53 @@ describe("gappers search params", () => {
 });
 
 describe("gapper summary cache", () => {
+  it("restores structured summary results for matching request/provider/model", () => {
+    const storage = new MemoryStorage();
+    const requests = [
+      {
+        previousCloseAt: "2026-06-15T20:00:00.000Z",
+        symbol: "ACME",
+      },
+    ];
+    const results = [structuredResult()];
+
+    saveGappersSummaryResults({
+      model: "gpt-4o-mini",
+      now: 1_000,
+      provider: "openai",
+      requests,
+      results,
+      storage,
+    });
+
+    expect(
+      getCachedGappersSummaryResults({
+        maxAgeMs: 60_000,
+        model: "gpt-4o-mini",
+        now: 2_000,
+        provider: "openai",
+        requests,
+        storage,
+      }),
+    ).toEqual({ cachedResults: results, missingRequests: [] });
+  });
+
+  it("hides earnings when every earnings and guidance field is empty", () => {
+    expect(hasGappersSummaryEarningsOrGuidance(structuredResult())).toBe(false);
+  });
+
+  it("shows earnings when an EPS, revenue, or guidance field is present", () => {
+    expect(
+      hasGappersSummaryEarningsOrGuidance({
+        ...structuredResult(),
+        earnings: {
+          adjustedEps: { actual: 1.2, estimate: 1.1, priorYear: 0.9 },
+          revenue: { actual: null, estimate: null, priorYear: null },
+        },
+      }),
+    ).toBe(true);
+  });
+
   it("clears saved summaries and the last displayed results without affecting other storage", () => {
     const storage = new MemoryStorage();
     const requests = [
@@ -413,6 +462,38 @@ describe("gapper summary cache", () => {
     ).toEqual([]);
   });
 });
+
+function structuredResult(): Extract<
+  GappersNewsSummaryResult,
+  { status: "success" }
+> {
+  return {
+    catalysts: [{ summary: "Moving with NVDA earnings.", type: "Sympathy" }],
+    confidence: "medium",
+    earnings: {
+      adjustedEps: { actual: null, estimate: null, priorYear: null },
+      revenue: { actual: null, estimate: null, priorYear: null },
+    },
+    fullYearGuidance: { eps: null, revenue: null },
+    headline: "ACME is gapping up with AI peers.",
+    nextQuarterGuidance: { eps: null, revenue: null },
+    notableNews: [],
+    sourceLayer: "web",
+    sources: [
+      {
+        id: "web:1",
+        layer: "web",
+        publishedUtc: null,
+        publisher: "Example",
+        snippet: "AI peers are moving.",
+        title: "AI peers rally",
+        url: "https://example.com/ai",
+      },
+    ],
+    status: "success",
+    symbol: "ACME",
+  };
+}
 
 function row(
   symbol: string,
