@@ -128,4 +128,3 @@ Clear cached news and summarise a selected gapper in an authenticated browser se
 - [ ] **Step 3: Create a draft pull request**
 
 Push `codex/gapper-news-date-filter`, open a draft PR against `main`, include verification and visual evidence (or the authenticated-browser limitation), then wait for CI.
-
