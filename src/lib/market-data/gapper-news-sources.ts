@@ -23,6 +23,13 @@ export type NewsSourceProvider = {
   ): Promise<NormalizedGapperNewsSource[]>;
 };
 
+type OpenAiWebNewsSource = {
+  publishedUtc: string;
+  summary: string;
+  title: string;
+  url: string;
+};
+
 export async function collectGapperNewsSources({
   massiveNews,
   previousCloseAt,
@@ -74,10 +81,13 @@ export function createOpenAiWebNewsSearchProvider({
               content: [
                 {
                   text: [
-                    `Find recent web/news context for ${request.symbol}.`,
-                    `Only include sources after ${request.previousCloseAt} when dates are available.`,
+                    `Find web/news context explaining why ${request.symbol} is moving today.`,
+                    `Only include sources published on or after ${request.previousCloseAt}.`,
+                    "For every source, use the publication timestamp stated by the source and return it in UTC ISO 8601 format.",
+                    "Exclude sources without a verifiable publication timestamp.",
+                    "Exclude earnings calendars, quote pages, company background pages, and prior earnings coverage.",
                     "Prefer direct company news, then peer, sector, or macro context explaining today's move.",
-                    "Return concise source findings.",
+                    "Return an empty sources array when no source qualifies.",
                   ].join("\n"),
                   type: "input_text",
                 },
@@ -86,6 +96,14 @@ export function createOpenAiWebNewsSearchProvider({
             },
           ],
           model: "gpt-4o-mini",
+          text: {
+            format: {
+              name: "gapper_web_news_sources",
+              schema: WEB_NEWS_SOURCE_SCHEMA,
+              strict: true,
+              type: "json_schema",
+            },
+          },
           tools: [{ type: "web_search" }],
         }),
         headers: {
@@ -99,7 +117,10 @@ export function createOpenAiWebNewsSearchProvider({
         throw new Error(`OpenAI web search request failed with ${response.status}`);
       }
 
-      return normalizeOpenAiWebSearchPayload(await response.json());
+      return normalizeOpenAiWebSearchPayload(
+        await response.json(),
+        request.previousCloseAt,
+      );
     },
   };
 }
@@ -170,42 +191,94 @@ function normalizeMassiveArticle(
 
 function normalizeOpenAiWebSearchPayload(
   payload: unknown,
+  previousCloseAt: string,
 ): NormalizedGapperNewsSource[] {
-  const row = payload as {
-    output?: Array<{
-      content?: Array<{
-        annotations?: Array<{ title?: string; url?: string }>;
-        text?: string;
-      }>;
-    }>;
-  };
-  const content = row.output?.flatMap((item) => item.content ?? []) ?? [];
-  const snippetsByUrl = new Map<string, string>();
+  const outputText = extractOpenAiResponseText(payload);
 
-  for (const item of content) {
-    if (!item.text) {
-      continue;
-    }
-
-    for (const annotation of item.annotations ?? []) {
-      if (annotation.url) {
-        snippetsByUrl.set(annotation.url, item.text);
-      }
-    }
+  if (!outputText) {
+    throw new Error("OpenAI web search response did not include text output");
   }
 
-  return content
-    .flatMap((item) => item.annotations ?? [])
-    .filter((annotation) => annotation.url && annotation.title)
-    .map((annotation, index) => ({
-      id: `web:${index}:${annotation.url}`,
+  let parsed: { sources?: OpenAiWebNewsSource[] };
+  try {
+    parsed = JSON.parse(outputText) as { sources?: OpenAiWebNewsSource[] };
+  } catch {
+    throw new Error("OpenAI web search response did not include valid JSON");
+  }
+
+  if (!Array.isArray(parsed.sources)) {
+    throw new Error("OpenAI web search response did not include sources");
+  }
+
+  const cutoff = new Date(previousCloseAt).getTime();
+  if (!Number.isFinite(cutoff)) {
+    throw new Error("Gapper previous close cutoff is invalid");
+  }
+
+  return parsed.sources
+    .filter((source) => isWebSourceFresh(source, cutoff))
+    .map((source, index) => ({
+      id: `web:${index}:${source.url}`,
       layer: "web" as const,
-      publishedUtc: null,
-      publisher: publisherFromUrl(annotation.url ?? null),
-      snippet: annotation.url ? snippetsByUrl.get(annotation.url) ?? null : null,
-      title: annotation.title ?? annotation.url ?? "Web source",
-      url: annotation.url ?? null,
+      publishedUtc: source.publishedUtc,
+      publisher: publisherFromUrl(source.url),
+      snippet: source.summary,
+      title: source.title,
+      url: source.url,
     }));
+}
+
+function isWebSourceFresh(source: OpenAiWebNewsSource, cutoff: number) {
+  if (
+    typeof source.publishedUtc !== "string" ||
+    typeof source.summary !== "string" ||
+    typeof source.title !== "string" ||
+    typeof source.url !== "string"
+  ) {
+    return false;
+  }
+
+  const publishedAt = new Date(source.publishedUtc).getTime();
+
+  return Number.isFinite(publishedAt) && publishedAt >= cutoff;
+}
+
+const WEB_NEWS_SOURCE_SCHEMA = {
+  additionalProperties: false,
+  properties: {
+    sources: {
+      items: {
+        additionalProperties: false,
+        properties: {
+          publishedUtc: { type: "string" },
+          summary: { type: "string" },
+          title: { type: "string" },
+          url: { type: "string" },
+        },
+        required: ["publishedUtc", "summary", "title", "url"],
+        type: "object",
+      },
+      type: "array",
+    },
+  },
+  required: ["sources"],
+  type: "object",
+};
+
+function extractOpenAiResponseText(payload: unknown) {
+  const row = payload as {
+    output?: Array<{ content?: Array<{ text?: string }> }>;
+    output_text?: string;
+  };
+
+  if (typeof row.output_text === "string") {
+    return row.output_text;
+  }
+
+  return row.output
+    ?.flatMap((item) => item.content ?? [])
+    .map((content) => content.text)
+    .find((text): text is string => typeof text === "string" && text.length > 0);
 }
 
 function publisherFromUrl(url: string | null) {

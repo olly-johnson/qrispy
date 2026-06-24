@@ -94,7 +94,7 @@ describe("collectGapperNewsSources", () => {
 });
 
 describe("createOpenAiWebNewsSearchProvider", () => {
-  it("requests web search and normalizes cited sources", async () => {
+  it("keeps only web findings published after the previous close", async () => {
     const fetcher = vi.fn().mockResolvedValue(
       new Response(
         JSON.stringify({
@@ -102,13 +102,28 @@ describe("createOpenAiWebNewsSearchProvider", () => {
             {
               content: [
                 {
-                  annotations: [
-                    {
-                      title: "AI peers rally",
-                      url: "https://example.com/ai",
-                    },
-                  ],
-                  text: "ACME is moving with AI peers.",
+                  text: JSON.stringify({
+                    sources: [
+                      {
+                        publishedUtc: "2026-06-16T12:30:00.000Z",
+                        summary: "Acme is up on AI server demand.",
+                        title: "Why Acme is up",
+                        url: "https://example.com/acme",
+                      },
+                      {
+                        publishedUtc: "2026-06-15T19:59:59.000Z",
+                        summary: "Acme reported last quarter's earnings.",
+                        title: "Acme earnings",
+                        url: "https://example.com/earnings",
+                      },
+                      {
+                        publishedUtc: "not-a-date",
+                        summary: "Undated source.",
+                        title: "Undated",
+                        url: "https://example.com/undated",
+                      },
+                    ],
+                  }),
                   type: "output_text",
                 },
               ],
@@ -130,13 +145,13 @@ describe("createOpenAiWebNewsSearchProvider", () => {
       }),
     ).resolves.toEqual([
       {
-        id: "web:0:https://example.com/ai",
+        id: "web:0:https://example.com/acme",
         layer: "web",
-        publishedUtc: null,
+        publishedUtc: "2026-06-16T12:30:00.000Z",
         publisher: "example.com",
-        snippet: "ACME is moving with AI peers.",
-        title: "AI peers rally",
-        url: "https://example.com/ai",
+        snippet: "Acme is up on AI server demand.",
+        title: "Why Acme is up",
+        url: "https://example.com/acme",
       },
     ]);
 
@@ -144,8 +159,65 @@ describe("createOpenAiWebNewsSearchProvider", () => {
     expect(options.headers.authorization).toBe("Bearer openai-key");
     expect(JSON.parse(options.body)).toMatchObject({
       model: "gpt-4o-mini",
+      text: {
+        format: {
+          name: "gapper_web_news_sources",
+          strict: true,
+          type: "json_schema",
+        },
+      },
       tools: [{ type: "web_search" }],
     });
+  });
+
+  it("falls through to X when every web finding is stale", async () => {
+    const web = createOpenAiWebNewsSearchProvider({
+      apiKey: "openai-key",
+      fetcher: vi.fn().mockResolvedValue(
+        new Response(
+          JSON.stringify({
+            output: [
+              {
+                content: [
+                  {
+                    annotations: [
+                      {
+                        title: "Old Acme earnings",
+                        url: "https://example.com/earnings",
+                      },
+                    ],
+                    text: JSON.stringify({
+                      sources: [
+                        {
+                          publishedUtc: "2026-06-15T19:59:59.000Z",
+                          summary: "Acme reported last quarter's earnings.",
+                          title: "Old Acme earnings",
+                          url: "https://example.com/earnings",
+                        },
+                      ],
+                    }),
+                    type: "output_text",
+                  },
+                ],
+              },
+            ],
+          }),
+          { status: 200 },
+        ),
+      ),
+    });
+    const xSource = source("x");
+    const x: NewsSourceProvider = { search: vi.fn(async () => [xSource]) };
+
+    await expect(
+      collectGapperNewsSources({
+        massiveNews: [],
+        previousCloseAt: "2026-06-15T20:00:00.000Z",
+        symbol: "ACME",
+        webProvider: web,
+        xProvider: x,
+      }),
+    ).resolves.toEqual({ layer: "x", sources: [xSource] });
   });
 });
 
