@@ -56,13 +56,26 @@ export async function collectGapperNewsSources({
     return { layer: "web" as const, sources: webSources };
   }
 
-  const xSources = xProvider ? await xProvider.search(request) : [];
+  const xSources = xProvider
+    ? await searchOptionalXSources(xProvider, request)
+    : [];
 
   if (xSources.length > 0) {
     return { layer: "x" as const, sources: xSources };
   }
 
   return { layer: "none" as const, sources: [] };
+}
+
+async function searchOptionalXSources(
+  provider: NewsSourceProvider,
+  request: GapperNewsSourceSearchRequest,
+) {
+  try {
+    return await provider.search(request);
+  } catch {
+    return [];
+  }
 }
 
 export function createOpenAiWebNewsSearchProvider({

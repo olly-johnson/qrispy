@@ -91,6 +91,25 @@ describe("collectGapperNewsSources", () => {
       }),
     ).resolves.toEqual({ layer: "none", sources: [] });
   });
+
+  it("returns none when the optional X fallback is unavailable", async () => {
+    const web: NewsSourceProvider = { search: vi.fn(async () => []) };
+    const x: NewsSourceProvider = {
+      search: vi.fn(async () => {
+        throw new Error("X news search request failed with 403");
+      }),
+    };
+
+    await expect(
+      collectGapperNewsSources({
+        massiveNews: [],
+        previousCloseAt: "2026-06-15T20:00:00.000Z",
+        symbol: "ACME",
+        webProvider: web,
+        xProvider: x,
+      }),
+    ).resolves.toEqual({ layer: "none", sources: [] });
+  });
 });
 
 describe("createOpenAiWebNewsSearchProvider", () => {
