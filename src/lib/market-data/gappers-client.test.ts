@@ -240,6 +240,38 @@ describe("gapper summary cache", () => {
     });
   });
 
+  it("does not restore summaries cached under the previous source contract", () => {
+    const storage = new MemoryStorage();
+    const requests = [
+      {
+        previousCloseAt: "2026-06-15T20:00:00.000Z",
+        symbol: "ACME",
+      },
+    ];
+    const result = {
+      message: "No Massive, web, or X context found after previous close.",
+      sourceLayer: "none" as const,
+      status: "no_news" as const,
+      symbol: "ACME",
+    };
+
+    storage.setItem(
+      "qrispy:gapper-news-summary:v2:openai:gpt-4o-mini:ACME:2026-06-15T20:00:00.000Z",
+      JSON.stringify({ result, savedAt: 1000 }),
+    );
+
+    expect(
+      getCachedGappersSummaryResults({
+        maxAgeMs: 60_000,
+        model: "gpt-4o-mini",
+        now: 2000,
+        provider: "openai",
+        requests,
+        storage,
+      }),
+    ).toEqual({ cachedResults: [], missingRequests: requests });
+  });
+
   it("returns expired or unmatched summary requests as missing", () => {
     const storage = new MemoryStorage();
     const requests = [

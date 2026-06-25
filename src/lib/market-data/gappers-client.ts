@@ -195,7 +195,7 @@ type LastSummaryResultsPayload = {
 };
 
 const SUMMARY_CACHE_NAMESPACE = "qrispy:gapper-news-summary:";
-const SUMMARY_CACHE_KEY_PREFIX = `${SUMMARY_CACHE_NAMESPACE}v2:`;
+const SUMMARY_CACHE_KEY_PREFIX = `${SUMMARY_CACHE_NAMESPACE}v3:`;
 const LAST_SUMMARY_RESULTS_KEY = `${SUMMARY_CACHE_KEY_PREFIX}last-results`;
 const EASTERN_TIME_ZONE = "America/New_York";
 
