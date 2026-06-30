@@ -10,6 +10,7 @@ import {
   buildGappersSummaryRequests,
   clearGappersNewsSummaryCache,
   filterGappersRows,
+  formatGappersSummaryEarningsLines,
   getCachedGappersSummaryResults,
   getLastGappersSummaryResults,
   hasGappersSummaryEarningsOrGuidance,
@@ -22,7 +23,7 @@ import {
 
 const AUTO_REFRESH_MS = 15 * 60 * 1000;
 const NEWS_SUMMARY_CACHE_MAX_AGE_MS = 24 * 60 * 60 * 1000;
-const NEWS_SUMMARY_MODELS = ["gpt-4o-mini", "gpt-4o-2024-08-06"] as const;
+const NEWS_SUMMARY_MODELS = ["gpt-5.5", "gpt-4o-2024-08-06", "gpt-4o-mini"] as const;
 
 export function GappersTable({
   error,
@@ -41,7 +42,7 @@ export function GappersTable({
   const router = useRouter();
   const [filters, setFilters] = useState<GappersFilters>(initialFilters);
   const [isSummarizing, setIsSummarizing] = useState(false);
-  const [newsModel, setNewsModel] = useState<(typeof NEWS_SUMMARY_MODELS)[number]>("gpt-4o-mini");
+  const [newsModel, setNewsModel] = useState<(typeof NEWS_SUMMARY_MODELS)[number]>("gpt-5.5");
   const [newsProvider, setNewsProvider] = useState("openai");
   const [selectedSymbols, setSelectedSymbols] = useState<Set<string>>(() => new Set());
   const [summaryError, setSummaryError] = useState<string | null>(null);
@@ -543,26 +544,7 @@ function SummaryEarningsBlock({
 }: {
   result: Extract<GappersNewsSummaryResult, { status: "success" }>;
 }) {
-  const rows = [
-    result.earnings.adjustedEps.actual != null
-      ? `Adjusted EPS ${formatSummaryCurrency(result.earnings.adjustedEps.actual, 2)}`
-      : null,
-    result.earnings.revenue.actual != null
-      ? `Revenue ${formatSummaryLargeCurrency(result.earnings.revenue.actual)}`
-      : null,
-    result.nextQuarterGuidance.eps
-      ? `Next quarter EPS ${result.nextQuarterGuidance.eps}`
-      : null,
-    result.nextQuarterGuidance.revenue
-      ? `Next quarter revenue ${result.nextQuarterGuidance.revenue}`
-      : null,
-    result.fullYearGuidance.eps
-      ? `Full year EPS ${result.fullYearGuidance.eps}`
-      : null,
-    result.fullYearGuidance.revenue
-      ? `Full year revenue ${result.fullYearGuidance.revenue}`
-      : null,
-  ].filter((row): row is string => row != null);
+  const rows = formatGappersSummaryEarningsLines(result);
 
   return (
     <div>
@@ -610,29 +592,3 @@ function formatPrice(value: number) {
   }).format(value);
 }
 
-function formatSummaryCurrency(value: number, decimals: number) {
-  return new Intl.NumberFormat("en-US", {
-    currency: "USD",
-    maximumFractionDigits: decimals,
-    minimumFractionDigits: decimals,
-    style: "currency",
-  }).format(value);
-}
-
-function formatSummaryLargeCurrency(value: number) {
-  if (Math.abs(value) >= 1_000_000_000) {
-    return `$${trimSummaryNumber(value / 1_000_000_000)}B`;
-  }
-  if (Math.abs(value) >= 1_000_000) {
-    return `$${trimSummaryNumber(value / 1_000_000)}M`;
-  }
-
-  return formatSummaryCurrency(value, 0);
-}
-
-function trimSummaryNumber(value: number) {
-  return new Intl.NumberFormat("en-US", {
-    maximumFractionDigits: 2,
-    minimumFractionDigits: 0,
-  }).format(value);
-}

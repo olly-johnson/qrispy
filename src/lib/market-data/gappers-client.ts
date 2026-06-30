@@ -18,9 +18,9 @@ export type GappersNewsSummaryResult =
         adjustedEps: GappersNewsSummaryMetric;
         revenue: GappersNewsSummaryMetric;
       };
-      fullYearGuidance: { eps: string | null; revenue: string | null };
+      fullYearGuidance: GappersNewsSummaryGuidance;
       headline: string;
-      nextQuarterGuidance: { eps: string | null; revenue: string | null };
+      nextQuarterGuidance: GappersNewsSummaryGuidance;
       notableNews: string[];
       sourceLayer: "massive" | "web" | "x";
       sources: GappersNewsSummarySource[];
@@ -49,6 +49,16 @@ export type GappersNewsSummaryMetric = {
   actual: number | null;
   estimate: number | null;
   priorYear: number | null;
+};
+
+export type GappersNewsSummaryGuidance = {
+  eps: GappersNewsSummaryGuidanceMetric;
+  revenue: GappersNewsSummaryGuidanceMetric;
+};
+
+export type GappersNewsSummaryGuidanceMetric = {
+  priorYear: number | null;
+  value: number | null;
 };
 
 export type GappersFilters = {
@@ -195,7 +205,7 @@ type LastSummaryResultsPayload = {
 };
 
 const SUMMARY_CACHE_NAMESPACE = "qrispy:gapper-news-summary:";
-const SUMMARY_CACHE_KEY_PREFIX = `${SUMMARY_CACHE_NAMESPACE}v3:`;
+const SUMMARY_CACHE_KEY_PREFIX = `${SUMMARY_CACHE_NAMESPACE}v4:`;
 const LAST_SUMMARY_RESULTS_KEY = `${SUMMARY_CACHE_KEY_PREFIX}last-results`;
 const EASTERN_TIME_ZONE = "America/New_York";
 
@@ -349,11 +359,46 @@ export function hasGappersSummaryEarningsOrGuidance(
     result.earnings.revenue.actual,
     result.earnings.revenue.estimate,
     result.earnings.revenue.priorYear,
-    result.nextQuarterGuidance.eps,
-    result.nextQuarterGuidance.revenue,
-    result.fullYearGuidance.eps,
-    result.fullYearGuidance.revenue,
-  ].some((value) => value != null && value !== "");
+    result.nextQuarterGuidance.eps.value,
+    result.nextQuarterGuidance.eps.priorYear,
+    result.nextQuarterGuidance.revenue.value,
+    result.nextQuarterGuidance.revenue.priorYear,
+    result.fullYearGuidance.eps.value,
+    result.fullYearGuidance.eps.priorYear,
+    result.fullYearGuidance.revenue.value,
+    result.fullYearGuidance.revenue.priorYear,
+  ].some((value) => value != null);
+}
+
+export function formatGappersSummaryEarningsLines(
+  result: Extract<GappersNewsSummaryResult, { status: "success" }>,
+) {
+  return [
+    `Adjusted EPS ${formatCurrencyOrNa(result.earnings.adjustedEps.actual, 2)} / YoY ${formatChangePercentOrNa(
+      result.earnings.adjustedEps.actual,
+      result.earnings.adjustedEps.priorYear,
+      0,
+    )} / Beat ${formatChangePercentOrNa(
+      result.earnings.adjustedEps.actual,
+      result.earnings.adjustedEps.estimate,
+      1,
+    )}`,
+    `Rev ${formatLargeCurrencyOrNa(result.earnings.revenue.actual)} / YoY ${formatChangePercentOrNa(
+      result.earnings.revenue.actual,
+      result.earnings.revenue.priorYear,
+      0,
+    )} / Beat ${formatChangePercentOrNa(
+      result.earnings.revenue.actual,
+      result.earnings.revenue.estimate,
+      1,
+    )}`,
+    `Guidance Next Quarter: EPS ${formatGuidanceYoY(result.nextQuarterGuidance.eps)} / Rev ${formatGuidanceYoY(
+      result.nextQuarterGuidance.revenue,
+    )}`,
+    `Full Year Guidance: ${formatGuidanceYoY(result.fullYearGuidance.eps)} / ${formatGuidanceYoY(
+      result.fullYearGuidance.revenue,
+    )}`,
+  ];
 }
 
 function buildGappersSummaryCacheKey({
@@ -408,6 +453,86 @@ function isGappersSummaryCacheFresh({
   }
 
   return !hasTradingDayPremarketOpenBetween(savedAt, now);
+}
+
+function formatCurrencyOrNa(value: number | null, decimals: number) {
+  if (value == null) {
+    return "NA";
+  }
+
+  return new Intl.NumberFormat("en-US", {
+    currency: "USD",
+    maximumFractionDigits: decimals,
+    minimumFractionDigits: decimals,
+    style: "currency",
+  }).format(value);
+}
+
+function formatLargeCurrencyOrNa(value: number | null) {
+  if (value == null) {
+    return "NA";
+  }
+  if (Math.abs(value) >= 1_000_000_000) {
+    return `$${trimSummaryNumber(value / 1_000_000_000)}B`;
+  }
+  if (Math.abs(value) >= 1_000_000) {
+    return `$${trimSummaryNumber(value / 1_000_000)}M`;
+  }
+
+  return formatCurrencyOrNa(value, 0);
+}
+
+function formatChangePercentOrNa(
+  actual: number | null,
+  baseline: number | null,
+  decimals: number,
+) {
+  const changePercent = calculateChangePercent(actual, baseline);
+
+  if (changePercent == null) {
+    return "NA";
+  }
+
+  return `${formatPercentNumber(changePercent, decimals)}%`;
+}
+
+function formatGuidanceYoY(metric: GappersNewsSummaryGuidanceMetric) {
+  const changePercent = calculateChangePercent(metric.value, metric.priorYear);
+
+  if (changePercent == null) {
+    return "NA";
+  }
+
+  return `${formatPercentNumber(changePercent, 0)}% YoY`;
+}
+
+function calculateChangePercent(
+  actual: number | null,
+  baseline: number | null,
+) {
+  if (actual == null || baseline == null || baseline === 0) {
+    return null;
+  }
+
+  return ((actual - baseline) / Math.abs(baseline)) * 100;
+}
+
+function formatPercentNumber(value: number, decimals: number) {
+  const factor = 10 ** decimals;
+  const rounded = Math.round(value * factor) / factor;
+
+  return new Intl.NumberFormat("en-US", {
+    maximumFractionDigits: decimals,
+    minimumFractionDigits: decimals,
+    useGrouping: false,
+  }).format(rounded);
+}
+
+function trimSummaryNumber(value: number) {
+  return new Intl.NumberFormat("en-US", {
+    maximumFractionDigits: 2,
+    minimumFractionDigits: 0,
+  }).format(value);
 }
 
 function hasTradingDayPremarketOpenBetween(savedAt: number, now: number) {

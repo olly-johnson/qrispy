@@ -109,7 +109,7 @@ export function getNewsSummaryLlmConfig(): NewsSummaryLlmConfig | null {
 
   return {
     apiKey,
-    model: process.env.NEWS_SUMMARY_LLM_MODEL ?? "gpt-4o-mini",
+    model: process.env.NEWS_SUMMARY_LLM_MODEL ?? "gpt-5.5",
     provider: "openai",
   };
 }

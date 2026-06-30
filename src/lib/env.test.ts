@@ -36,7 +36,7 @@ describe("getNewsSummaryLlmConfig", () => {
 
     expect(getNewsSummaryLlmConfig()).toEqual({
       apiKey: "openai-key",
-      model: "gpt-4o-mini",
+      model: "gpt-5.5",
       provider: "openai",
     });
   });

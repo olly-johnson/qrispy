@@ -45,7 +45,7 @@ export async function POST(request: Request) {
 
   const configured = getNewsSummaryLlmConfig();
   const selection = resolveNewsSummaryModel({
-    requestedModel: body.model ?? configured?.model ?? "gpt-4o-mini",
+    requestedModel: body.model ?? configured?.model ?? "gpt-5.5",
     requestedProvider: body.provider ?? configured?.provider ?? "openai",
   });
 

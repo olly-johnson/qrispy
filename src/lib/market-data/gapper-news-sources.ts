@@ -43,7 +43,9 @@ export async function collectGapperNewsSources({
   webProvider?: NewsSourceProvider | null;
   xProvider?: NewsSourceProvider | null;
 }) {
-  const massiveSources = massiveNews.map(normalizeMassiveArticle);
+  const massiveSources = massiveNews
+    .filter((article) => isRelevantMassiveArticle(article, symbol))
+    .map(normalizeMassiveArticle);
 
   if (massiveSources.length > 0) {
     return { layer: "massive" as const, sources: massiveSources };
@@ -200,6 +202,31 @@ function normalizeMassiveArticle(
     title: article.title,
     url: article.articleUrl,
   };
+}
+
+function isRelevantMassiveArticle(article: MassiveNewsArticle, symbol: string) {
+  const normalizedSymbol = symbol.toUpperCase();
+  const text = `${article.title} ${article.description ?? ""}`;
+  const mentionsSymbol = new RegExp(`\\$?\\b${escapeRegExp(normalizedSymbol)}\\b`, "i").test(
+    text,
+  );
+  const isSingleTicker = article.tickers.length <= 1;
+
+  if (isSingleTicker || mentionsSymbol) {
+    return true;
+  }
+
+  return !isBroadMarketArticle(text);
+}
+
+function isBroadMarketArticle(text: string) {
+  return /\b(etf|s&p 500|stock market today|market today|better buy|buy right now|trillion-dollar|market size|research by|back half|unstoppable)\b/i.test(
+    text,
+  );
+}
+
+function escapeRegExp(value: string) {
+  return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 }
 
 function normalizeOpenAiWebSearchPayload(

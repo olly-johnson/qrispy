@@ -20,10 +20,10 @@ describe("resolveNewsSummaryModel", () => {
   it("accepts only configured provider/model allowlist values", () => {
     expect(
       resolveNewsSummaryModel({
-        requestedModel: "gpt-4o-mini",
+        requestedModel: "gpt-5.5",
         requestedProvider: "openai",
       }),
-    ).toEqual({ model: "gpt-4o-mini", provider: "openai" });
+    ).toEqual({ model: "gpt-5.5", provider: "openai" });
 
     expect(() =>
       resolveNewsSummaryModel({
@@ -178,9 +178,15 @@ function extracted(): ExtractedGapperNews {
       adjustedEps: { actual: null, estimate: null, priorYear: null },
       revenue: { actual: null, estimate: null, priorYear: null },
     },
-    fullYearGuidance: { eps: null, revenue: null },
+    fullYearGuidance: {
+      eps: { priorYear: null, value: null },
+      revenue: { priorYear: null, value: null },
+    },
     headline: "ACME is gapping up with AI infrastructure peers.",
-    nextQuarterGuidance: { eps: null, revenue: null },
+    nextQuarterGuidance: {
+      eps: { priorYear: null, value: null },
+      revenue: { priorYear: null, value: null },
+    },
     notableNews: [],
   };
 }
