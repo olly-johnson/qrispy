@@ -44,6 +44,37 @@ describe("collectGapperNewsSources", () => {
     expect(x.search).not.toHaveBeenCalled();
   });
 
+  it("falls through to web when Massive only returns broad multi-ticker market articles", async () => {
+    const broadMassiveArticle = {
+      articleUrl: "https://massive.test/semis-etf",
+      description:
+        "A semiconductor ETF article mentions many chip stocks.",
+      id: "broad-1",
+      publishedUtc: "2026-06-16T12:00:00.000Z",
+      tickers: ["ACME", "NVDA", "AMD", "INTC", "QCOM"],
+      title: "This Tech ETF Has More than Doubled in 2026",
+    };
+    const webSource = source("web");
+    const web: NewsSourceProvider = { search: vi.fn(async () => [webSource]) };
+    const x: NewsSourceProvider = { search: vi.fn() };
+
+    await expect(
+      collectGapperNewsSources({
+        massiveNews: [broadMassiveArticle],
+        previousCloseAt: "2026-06-15T20:00:00.000Z",
+        symbol: "ACME",
+        webProvider: web,
+        xProvider: x,
+      }),
+    ).resolves.toEqual({ layer: "web", sources: [webSource] });
+
+    expect(web.search).toHaveBeenCalledWith({
+      previousCloseAt: "2026-06-15T20:00:00.000Z",
+      symbol: "ACME",
+    });
+    expect(x.search).not.toHaveBeenCalled();
+  });
+
   it("uses web when Massive is empty and does not call X", async () => {
     const webSource = source("web");
     const web: NewsSourceProvider = { search: vi.fn(async () => [webSource]) };

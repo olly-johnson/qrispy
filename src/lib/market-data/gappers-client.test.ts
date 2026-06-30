@@ -3,6 +3,7 @@ import { describe, expect, it } from "vitest";
 import {
   buildGappersSummaryRequests,
   clearGappersNewsSummaryCache,
+  formatGappersSummaryEarningsLines,
   getCachedGappersSummaryResults,
   hasGappersSummaryEarningsOrGuidance,
   getLastGappersSummaryResults,
@@ -151,6 +152,38 @@ describe("gapper summary cache", () => {
     ).toBe(true);
   });
 
+  it("formats earnings and guidance as actual, YoY percent, and beat percent lines", () => {
+    expect(
+      formatGappersSummaryEarningsLines({
+        ...structuredResult(),
+        earnings: {
+          adjustedEps: { actual: 25.11, estimate: 20.2, priorYear: 1.91 },
+          revenue: {
+            actual: 41_460_000_000,
+            estimate: 35_820_000_000,
+            priorYear: 9_300_000_000,
+          },
+        },
+        fullYearGuidance: {
+          eps: { priorYear: null, value: null },
+          revenue: { priorYear: null, value: null },
+        },
+        nextQuarterGuidance: {
+          eps: { priorYear: 2.78, value: 28.44 },
+          revenue: {
+            priorYear: 11_310_000_000,
+            value: 50_000_000_000,
+          },
+        },
+      }),
+    ).toEqual([
+      "Adjusted EPS $25.11 / YoY 1215% / Beat 24.3%",
+      "Rev $41.46B / YoY 346% / Beat 15.7%",
+      "Guidance Next Quarter: EPS 923% YoY / Rev 342% YoY",
+      "Full Year Guidance: NA / NA",
+    ]);
+  });
+
   it("clears saved summaries and the last displayed results without affecting other storage", () => {
     const storage = new MemoryStorage();
     const requests = [
@@ -256,7 +289,7 @@ describe("gapper summary cache", () => {
     };
 
     storage.setItem(
-      "qrispy:gapper-news-summary:v2:openai:gpt-4o-mini:ACME:2026-06-15T20:00:00.000Z",
+      "qrispy:gapper-news-summary:v3:openai:gpt-4o-mini:ACME:2026-06-15T20:00:00.000Z",
       JSON.stringify({ result, savedAt: 1000 }),
     );
 
@@ -506,9 +539,15 @@ function structuredResult(): Extract<
       adjustedEps: { actual: null, estimate: null, priorYear: null },
       revenue: { actual: null, estimate: null, priorYear: null },
     },
-    fullYearGuidance: { eps: null, revenue: null },
+    fullYearGuidance: {
+      eps: { priorYear: null, value: null },
+      revenue: { priorYear: null, value: null },
+    },
     headline: "ACME is gapping up with AI peers.",
-    nextQuarterGuidance: { eps: null, revenue: null },
+    nextQuarterGuidance: {
+      eps: { priorYear: null, value: null },
+      revenue: { priorYear: null, value: null },
+    },
     notableNews: [],
     sourceLayer: "web",
     sources: [

@@ -27,10 +27,20 @@ export type ExtractedGapperNews = {
       priorYear: number | null;
     };
   };
-  fullYearGuidance: { eps: string | null; revenue: string | null };
+  fullYearGuidance: GapperGuidanceMetrics;
   headline: string;
-  nextQuarterGuidance: { eps: string | null; revenue: string | null };
+  nextQuarterGuidance: GapperGuidanceMetrics;
   notableNews: string[];
+};
+
+export type GapperGuidanceMetrics = {
+  eps: GapperGuidanceMetric;
+  revenue: GapperGuidanceMetric;
+};
+
+export type GapperGuidanceMetric = {
+  priorYear: number | null;
+  value: number | null;
 };
 
 export type NewsSummaryProvider = {
@@ -59,7 +69,7 @@ export type NewsSummaryResult =
     };
 
 const SUPPORTED_MODELS = {
-  openai: ["gpt-4o-mini", "gpt-4o-2024-08-06"],
+  openai: ["gpt-5.5", "gpt-4o-2024-08-06", "gpt-4o-mini"],
 } as const;
 
 export function calculateChangePercent(
@@ -96,7 +106,7 @@ export function resolveNewsSummaryModel({
 }
 
 export async function batchSummarizeGapperNews({
-  model = "gpt-4o-mini",
+  model = "gpt-5.5",
   provider,
   requests,
 }: {
@@ -163,8 +173,11 @@ export function createOpenAiNewsSummaryProvider({
                     "Return one to three material catalysts.",
                     "Use only the supplied sources.",
                     "Do not infer missing numbers.",
-                    "Return null for unavailable numeric or guidance fields.",
-                    "Guidance fields must be YoY percentage strings only; return null when guidance is only given as absolute EPS or revenue values.",
+                    "Return null for unavailable numeric fields.",
+                    "Return reported revenue values as raw US dollars, not millions or billions.",
+                    "For nextQuarterGuidance and fullYearGuidance, return raw guidance values and their prior-year comparable values only. Do not calculate YoY percentages.",
+                    "Leave guidance priorYear null when the supplied sources do not include a comparable prior-year value.",
+                    "The app calculates YoY and beat percentages; do not put percentage strings in numeric fields.",
                     "Use confidence to express uncertainty instead of inventing facts.",
                     "When sourceLayer is x, treat X posts as social context unless they link to credible sources.",
                     `Symbol: ${input.symbol}`,
@@ -213,7 +226,6 @@ export function createOpenAiNewsSummaryProvider({
 }
 
 const nullableNumber = { anyOf: [{ type: "number" }, { type: "null" }] };
-const nullableString = { anyOf: [{ type: "string" }, { type: "null" }] };
 
 const NEWS_SUMMARY_JSON_SCHEMA = {
   additionalProperties: false,
@@ -275,10 +287,22 @@ function guidanceSchema() {
   return {
     additionalProperties: false,
     properties: {
-      eps: nullableString,
-      revenue: nullableString,
+      eps: guidanceMetricSchema(),
+      revenue: guidanceMetricSchema(),
     },
     required: ["eps", "revenue"],
+    type: "object",
+  };
+}
+
+function guidanceMetricSchema() {
+  return {
+    additionalProperties: false,
+    properties: {
+      priorYear: nullableNumber,
+      value: nullableNumber,
+    },
+    required: ["priorYear", "value"],
     type: "object",
   };
 }
