@@ -30,6 +30,14 @@ export type NewsSummaryWebSearchConfig =
   | { apiKey: string; enabled: true; provider: "openai" }
   | { enabled: false; provider: "openai" };
 
+export type NewsSummaryMarketauxConfig =
+  | { apiKey: string; baseUrl: string; enabled: true }
+  | { enabled: false };
+
+export type NewsSummaryGrokConfig =
+  | { apiKey: string; baseUrl: string; enabled: true; model: string }
+  | { enabled: false };
+
 export type NewsSummaryXConfig =
   | { bearerToken: string; enabled: true }
   | { enabled: false };
@@ -138,6 +146,39 @@ export function getNewsSummaryWebSearchConfig(): NewsSummaryWebSearchConfig {
   }
 
   return { apiKey, enabled: true, provider: "openai" };
+}
+
+export function getNewsSummaryMarketauxConfig(): NewsSummaryMarketauxConfig {
+  const enabled =
+    (process.env.NEWS_SUMMARY_MARKETAUX_ENABLED ?? "false").toLowerCase() ===
+    "true";
+  const apiKey = process.env.MARKETAUX_API_KEY ?? process.env.MARKETAUX_API_TOKEN;
+  const baseUrl =
+    process.env.MARKETAUX_API_BASE_URL ?? "https://api.marketaux.com/v1";
+
+  if (!enabled || !apiKey) {
+    return { enabled: false };
+  }
+
+  return { apiKey, baseUrl: baseUrl.replace(/\/$/, ""), enabled: true };
+}
+
+export function getNewsSummaryGrokConfig(): NewsSummaryGrokConfig {
+  const enabled =
+    (process.env.NEWS_SUMMARY_GROK_ENABLED ?? "false").toLowerCase() === "true";
+  const apiKey = process.env.XAI_API_KEY;
+  const baseUrl = process.env.XAI_API_BASE_URL ?? "https://api.x.ai/v1";
+
+  if (!enabled || !apiKey) {
+    return { enabled: false };
+  }
+
+  return {
+    apiKey,
+    baseUrl: baseUrl.replace(/\/$/, ""),
+    enabled: true,
+    model: process.env.NEWS_SUMMARY_GROK_MODEL ?? "grok-4.3",
+  };
 }
 
 export function getNewsSummaryXConfig(): NewsSummaryXConfig {

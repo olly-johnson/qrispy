@@ -123,7 +123,8 @@ export async function batchSummarizeGapperNews({
     requests.map(async (request) => {
       if (request.sourceLayer === "none") {
         return {
-          message: "No Massive, web, or X context found after previous close.",
+          message:
+            "No Massive, Marketaux, OpenAI web, or Grok context found after previous close.",
           sourceLayer: "none" as const,
           status: "no_news" as const,
           symbol: request.symbol,
@@ -179,7 +180,7 @@ export function createOpenAiNewsSummaryProvider({
                     "Leave guidance priorYear null when the supplied sources do not include a comparable prior-year value.",
                     "The app calculates YoY and beat percentages; do not put percentage strings in numeric fields.",
                     "Use confidence to express uncertainty instead of inventing facts.",
-                    "When sourceLayer is x, treat X posts as social context unless they link to credible sources.",
+                    "When sourceLayer is grok, treat Grok/X context as social context unless it links to credible sources.",
                     `Symbol: ${input.symbol}`,
                     `Previous close cutoff: ${input.previousCloseAt}`,
                     `Source layer: ${input.sourceLayer}`,

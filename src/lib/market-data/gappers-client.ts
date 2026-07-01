@@ -22,7 +22,7 @@ export type GappersNewsSummaryResult =
       headline: string;
       nextQuarterGuidance: GappersNewsSummaryGuidance;
       notableNews: string[];
-      sourceLayer: "massive" | "web" | "x";
+      sourceLayer: "grok" | "marketaux" | "massive" | "web" | "x";
       sources: GappersNewsSummarySource[];
       status: "success";
       symbol: string;
@@ -30,14 +30,14 @@ export type GappersNewsSummaryResult =
   | { message: string; sourceLayer: "none"; status: "no_news"; symbol: string }
   | {
       error: string;
-      sourceLayer: "massive" | "none" | "web" | "x";
+      sourceLayer: "grok" | "marketaux" | "massive" | "none" | "web" | "x";
       status: "error";
       symbol: string;
     };
 
 export type GappersNewsSummarySource = {
   id: string;
-  layer: "massive" | "web" | "x";
+  layer: "grok" | "marketaux" | "massive" | "web" | "x";
   publishedUtc: string | null;
   publisher: string | null;
   snippet: string | null;
@@ -205,7 +205,7 @@ type LastSummaryResultsPayload = {
 };
 
 const SUMMARY_CACHE_NAMESPACE = "qrispy:gapper-news-summary:";
-const SUMMARY_CACHE_KEY_PREFIX = `${SUMMARY_CACHE_NAMESPACE}v4:`;
+const SUMMARY_CACHE_KEY_PREFIX = `${SUMMARY_CACHE_NAMESPACE}v5:`;
 const LAST_SUMMARY_RESULTS_KEY = `${SUMMARY_CACHE_KEY_PREFIX}last-results`;
 const EASTERN_TIME_ZONE = "America/New_York";
 
