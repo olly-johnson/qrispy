@@ -123,7 +123,8 @@ describe("batchSummarizeGapperNews", () => {
       }),
     ).resolves.toEqual([
       {
-        message: "No Massive, web, or X context found after previous close.",
+        message:
+          "No Massive, Marketaux, OpenAI web, or Grok context found after previous close.",
         sourceLayer: "none",
         status: "no_news",
         symbol: "ACME",
@@ -149,8 +150,8 @@ describe("createOpenAiNewsSummaryProvider", () => {
     await provider.extract({
       model: "gpt-4o-mini",
       previousCloseAt: "2026-06-15T20:00:00.000Z",
-      sourceLayer: "x",
-      sources: [source("x")],
+      sourceLayer: "grok",
+      sources: [source("grok")],
       symbol: "ACME",
     });
 
@@ -158,7 +159,7 @@ describe("createOpenAiNewsSummaryProvider", () => {
     expect(body.model).toBe("gpt-4o-mini");
     expect(body.text.format.type).toBe("json_schema");
     expect(body.text.format.strict).toBe(true);
-    expect(JSON.stringify(body)).toContain("Source layer: x");
+    expect(JSON.stringify(body)).toContain("Source layer: grok");
     expect(JSON.stringify(body)).toContain("social context");
     expect(JSON.stringify(body)).toContain("ACME source");
   });
@@ -192,7 +193,7 @@ function extracted(): ExtractedGapperNews {
 }
 
 function source(
-  layer: "massive" | "web" | "x",
+  layer: "grok" | "marketaux" | "massive" | "web",
 ): NormalizedGapperNewsSource {
   return {
     id: `${layer}:1`,

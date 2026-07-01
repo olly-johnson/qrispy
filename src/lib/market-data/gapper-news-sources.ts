@@ -1,6 +1,12 @@
 import type { MassiveNewsArticle } from "./massive";
 
-export type GapperNewsSourceLayer = "massive" | "none" | "web" | "x";
+export type GapperNewsSourceLayer =
+  | "grok"
+  | "marketaux"
+  | "massive"
+  | "none"
+  | "web"
+  | "x";
 
 export type NormalizedGapperNewsSource = {
   id: string;
@@ -30,14 +36,44 @@ type OpenAiWebNewsSource = {
   url: string;
 };
 
+type MarketauxNewsArticle = {
+  description?: string | null;
+  entities?: Array<{
+    highlights?: Array<{
+      highlight?: string;
+      highlighted_in?: string;
+      sentiment?: number;
+    }>;
+    match_score?: number;
+    symbol?: string;
+  }>;
+  published_at?: string;
+  source?: string | null;
+  title?: string;
+  url?: string;
+  uuid?: string;
+};
+
+type GrokNewsSource = {
+  publishedUtc: string;
+  publisher?: string | null;
+  summary: string;
+  title: string;
+  url: string;
+};
+
 export async function collectGapperNewsSources({
+  grokProvider,
   massiveNews,
+  marketauxProvider,
   previousCloseAt,
   symbol,
   webProvider,
   xProvider,
 }: {
+  grokProvider?: NewsSourceProvider | null;
   massiveNews: MassiveNewsArticle[];
+  marketauxProvider?: NewsSourceProvider | null;
   previousCloseAt: string;
   symbol: string;
   webProvider?: NewsSourceProvider | null;
@@ -52,14 +88,30 @@ export async function collectGapperNewsSources({
   }
 
   const request = { previousCloseAt, symbol: symbol.toUpperCase() };
+  const marketauxSources = marketauxProvider
+    ? await marketauxProvider.search(request)
+    : [];
+
+  if (marketauxSources.length > 0) {
+    return { layer: "marketaux" as const, sources: marketauxSources };
+  }
+
   const webSources = webProvider ? await webProvider.search(request) : [];
 
   if (webSources.length > 0) {
     return { layer: "web" as const, sources: webSources };
   }
 
+  const grokSources = grokProvider
+    ? await searchOptionalSources(grokProvider, request)
+    : [];
+
+  if (grokSources.length > 0) {
+    return { layer: "grok" as const, sources: grokSources };
+  }
+
   const xSources = xProvider
-    ? await searchOptionalXSources(xProvider, request)
+    ? await searchOptionalSources(xProvider, request)
     : [];
 
   if (xSources.length > 0) {
@@ -69,7 +121,7 @@ export async function collectGapperNewsSources({
   return { layer: "none" as const, sources: [] };
 }
 
-async function searchOptionalXSources(
+async function searchOptionalSources(
   provider: NewsSourceProvider,
   request: GapperNewsSourceSearchRequest,
 ) {
@@ -204,6 +256,104 @@ function normalizeMassiveArticle(
   };
 }
 
+export function createMarketauxNewsSearchProvider({
+  apiKey,
+  baseUrl = "https://api.marketaux.com/v1",
+  fetcher = fetch,
+}: {
+  apiKey: string;
+  baseUrl?: string;
+  fetcher?: typeof fetch;
+}): NewsSourceProvider {
+  return {
+    async search(request) {
+      const url = new URL(`${baseUrl.replace(/\/$/, "")}/news/all`);
+      url.searchParams.set("api_token", apiKey);
+      url.searchParams.set("symbols", request.symbol);
+      url.searchParams.set("published_after", request.previousCloseAt);
+      url.searchParams.set("filter_entities", "true");
+      url.searchParams.set("must_have_entities", "true");
+      url.searchParams.set("language", "en");
+      url.searchParams.set("limit", "10");
+
+      const response = await fetcher(url.toString());
+
+      if (!response.ok) {
+        throw new Error(`Marketaux news request failed with ${response.status}`);
+      }
+
+      const payload = (await response.json()) as {
+        data?: MarketauxNewsArticle[];
+      };
+
+      return normalizeMarketauxPayload(
+        payload.data ?? [],
+        request.previousCloseAt,
+        request.symbol,
+      );
+    },
+  };
+}
+
+export function createGrokNewsSearchProvider({
+  apiKey,
+  baseUrl = "https://api.x.ai/v1",
+  fetcher = fetch,
+  model = "grok-4.3",
+}: {
+  apiKey: string;
+  baseUrl?: string;
+  fetcher?: typeof fetch;
+  model?: string;
+}): NewsSourceProvider {
+  return {
+    async search(request) {
+      const response = await fetcher(`${baseUrl.replace(/\/$/, "")}/responses`, {
+        body: JSON.stringify({
+          input: [
+            {
+              content: [
+                {
+                  text: [
+                    `Find current X/social context explaining why ${request.symbol} is moving today.`,
+                    `Only include posts or sources published on or after ${request.previousCloseAt}.`,
+                    "Prefer credible market-news accounts, company accounts, journalists, or posts linking to credible sources.",
+                    "Return strict JSON only with this shape: {\"sources\":[{\"publishedUtc\":\"ISO timestamp\",\"publisher\":\"source or handle\",\"summary\":\"short summary\",\"title\":\"source title or handle\",\"url\":\"source URL\"}]}",
+                    "Return an empty sources array when no source qualifies.",
+                  ].join("\n"),
+                  type: "input_text",
+                },
+              ],
+              role: "user",
+            },
+          ],
+          model,
+          tools: [
+            {
+              from_date: dateOnly(request.previousCloseAt),
+              type: "x_search",
+            },
+          ],
+        }),
+        headers: {
+          authorization: `Bearer ${apiKey}`,
+          "content-type": "application/json",
+        },
+        method: "POST",
+      });
+
+      if (!response.ok) {
+        throw new Error(`Grok news search request failed with ${response.status}`);
+      }
+
+      return normalizeGrokSearchPayload(
+        await response.json(),
+        request.previousCloseAt,
+      );
+    },
+  };
+}
+
 function isRelevantMassiveArticle(article: MassiveNewsArticle, symbol: string) {
   const normalizedSymbol = symbol.toUpperCase();
   const text = `${article.title} ${article.description ?? ""}`;
@@ -268,6 +418,105 @@ function normalizeOpenAiWebSearchPayload(
     }));
 }
 
+function normalizeMarketauxPayload(
+  articles: MarketauxNewsArticle[],
+  previousCloseAt: string,
+  symbol: string,
+): NormalizedGapperNewsSource[] {
+  const cutoff = cutoffTime(previousCloseAt);
+  const normalizedSymbol = symbol.toUpperCase();
+
+  return articles
+    .filter((article) => {
+      const publishedAt = new Date(article.published_at ?? "").getTime();
+      const hasMatchingEntity = (article.entities ?? []).some(
+        (entity) => entity.symbol?.toUpperCase() === normalizedSymbol,
+      );
+
+      return Number.isFinite(publishedAt) && publishedAt >= cutoff && hasMatchingEntity;
+    })
+    .map((article, index) => ({
+      id: `marketaux:${article.uuid ?? article.url ?? index}`,
+      layer: "marketaux" as const,
+      publishedUtc: article.published_at ?? null,
+      publisher: article.source ?? publisherFromUrl(article.url ?? null),
+      snippet: marketauxSnippet(article),
+      title: article.title ?? "Marketaux news",
+      url: article.url ?? null,
+    }));
+}
+
+function normalizeGrokSearchPayload(
+  payload: unknown,
+  previousCloseAt: string,
+): NormalizedGapperNewsSource[] {
+  const outputText = extractOpenAiResponseText(payload);
+
+  if (!outputText) {
+    throw new Error("Grok news search response did not include text output");
+  }
+
+  let parsed: { sources?: GrokNewsSource[] };
+  try {
+    parsed = JSON.parse(outputText) as { sources?: GrokNewsSource[] };
+  } catch {
+    throw new Error("Grok news search response did not include valid JSON");
+  }
+
+  if (!Array.isArray(parsed.sources)) {
+    throw new Error("Grok news search response did not include sources");
+  }
+
+  const cutoff = cutoffTime(previousCloseAt);
+
+  return parsed.sources
+    .filter((source) => isGrokSourceFresh(source, cutoff))
+    .map((source, index) => ({
+      id: `grok:${index}:${source.url}`,
+      layer: "grok" as const,
+      publishedUtc: source.publishedUtc,
+      publisher: source.publisher ?? publisherFromUrl(source.url),
+      snippet: source.summary,
+      title: source.title,
+      url: source.url,
+    }));
+}
+
+function marketauxSnippet(article: MarketauxNewsArticle) {
+  return (
+    article.entities
+      ?.flatMap((entity) => entity.highlights ?? [])
+      .map((highlight) => highlight.highlight)
+      .find((highlight): highlight is string => Boolean(highlight)) ??
+    article.description ??
+    null
+  );
+}
+
+function isGrokSourceFresh(source: GrokNewsSource, cutoff: number) {
+  if (
+    typeof source.publishedUtc !== "string" ||
+    typeof source.summary !== "string" ||
+    typeof source.title !== "string" ||
+    typeof source.url !== "string"
+  ) {
+    return false;
+  }
+
+  const publishedAt = new Date(source.publishedUtc).getTime();
+
+  return Number.isFinite(publishedAt) && publishedAt >= cutoff;
+}
+
+function cutoffTime(previousCloseAt: string) {
+  const cutoff = new Date(previousCloseAt).getTime();
+  if (!Number.isFinite(cutoff)) {
+    throw new Error("Gapper previous close cutoff is invalid");
+  }
+
+  return cutoff;
+}
+
 function isWebSourceFresh(source: OpenAiWebNewsSource, cutoff: number) {
   if (
     typeof source.publishedUtc !== "string" ||
@@ -281,6 +530,10 @@ function isWebSourceFresh(source: OpenAiWebNewsSource, cutoff: number) {
   const publishedAt = new Date(source.publishedUtc).getTime();
 
   return Number.isFinite(publishedAt) && publishedAt >= cutoff;
+}
+
+function dateOnly(value: string) {
+  return value.slice(0, 10);
 }
 
 const WEB_NEWS_SOURCE_SCHEMA = {

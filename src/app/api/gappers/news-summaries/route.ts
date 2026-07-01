@@ -1,8 +1,9 @@
 import { getCurrentUser } from "@/lib/auth/session";
 import {
+  getNewsSummaryGrokConfig,
   getNewsSummaryLlmConfig,
+  getNewsSummaryMarketauxConfig,
   getNewsSummaryWebSearchConfig,
-  getNewsSummaryXConfig,
 } from "@/lib/env";
 import {
   batchSummarizeGapperNews,
@@ -11,8 +12,9 @@ import {
 } from "@/lib/market-data/gapper-news-summary";
 import {
   collectGapperNewsSources,
+  createGrokNewsSearchProvider,
+  createMarketauxNewsSearchProvider,
   createOpenAiWebNewsSearchProvider,
-  createXNewsSearchProvider,
 } from "@/lib/market-data/gapper-news-sources";
 import { createMassiveMarketDataProvider } from "@/lib/market-data/massive";
 
@@ -71,13 +73,24 @@ export async function POST(request: Request) {
     );
   }
 
+  const marketauxConfig = getNewsSummaryMarketauxConfig();
   const webConfig = getNewsSummaryWebSearchConfig();
-  const xConfig = getNewsSummaryXConfig();
+  const grokConfig = getNewsSummaryGrokConfig();
+  const marketauxProvider = marketauxConfig.enabled
+    ? createMarketauxNewsSearchProvider({
+        apiKey: marketauxConfig.apiKey,
+        baseUrl: marketauxConfig.baseUrl,
+      })
+    : null;
   const webProvider = webConfig.enabled
     ? createOpenAiWebNewsSearchProvider({ apiKey: webConfig.apiKey })
     : null;
-  const xProvider = xConfig.enabled
-    ? createXNewsSearchProvider({ bearerToken: xConfig.bearerToken })
+  const grokProvider = grokConfig.enabled
+    ? createGrokNewsSearchProvider({
+        apiKey: grokConfig.apiKey,
+        baseUrl: grokConfig.baseUrl,
+        model: grokConfig.model,
+      })
     : null;
 
   try {
@@ -89,11 +102,12 @@ export async function POST(request: Request) {
           ticker: symbol,
         });
         const collected = await collectGapperNewsSources({
+          grokProvider,
           massiveNews,
+          marketauxProvider,
           previousCloseAt: ticker.previousCloseAt,
           symbol,
           webProvider,
-          xProvider,
         });
 
         return {

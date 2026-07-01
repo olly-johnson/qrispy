@@ -5,11 +5,15 @@ import { POST } from "./route";
 const mocks = vi.hoisted(() => ({
   batchSummarizeGapperNews: vi.fn(),
   collectGapperNewsSources: vi.fn(),
+  createGrokNewsSearchProvider: vi.fn(),
+  createMarketauxNewsSearchProvider: vi.fn(),
   createOpenAiNewsSummaryProvider: vi.fn(),
   createOpenAiWebNewsSearchProvider: vi.fn(),
   createXNewsSearchProvider: vi.fn(),
   getCurrentUser: vi.fn(),
+  getNewsSummaryGrokConfig: vi.fn(),
   getNewsSummaryLlmConfig: vi.fn(),
+  getNewsSummaryMarketauxConfig: vi.fn(),
   getNewsSummaryWebSearchConfig: vi.fn(),
   getNewsSummaryXConfig: vi.fn(),
   getTickerNews: vi.fn(),
@@ -27,13 +31,17 @@ vi.mock("@/lib/env", () => ({
     apiKey: "massive-key",
     baseUrl: "https://api.massive.com",
   }),
+  getNewsSummaryGrokConfig: mocks.getNewsSummaryGrokConfig,
   getNewsSummaryLlmConfig: mocks.getNewsSummaryLlmConfig,
+  getNewsSummaryMarketauxConfig: mocks.getNewsSummaryMarketauxConfig,
   getNewsSummaryWebSearchConfig: mocks.getNewsSummaryWebSearchConfig,
   getNewsSummaryXConfig: mocks.getNewsSummaryXConfig,
 }));
 
 vi.mock("@/lib/market-data/gapper-news-sources", () => ({
   collectGapperNewsSources: mocks.collectGapperNewsSources,
+  createGrokNewsSearchProvider: mocks.createGrokNewsSearchProvider,
+  createMarketauxNewsSearchProvider: mocks.createMarketauxNewsSearchProvider,
   createOpenAiWebNewsSearchProvider: mocks.createOpenAiWebNewsSearchProvider,
   createXNewsSearchProvider: mocks.createXNewsSearchProvider,
 }));
@@ -54,6 +62,8 @@ describe("POST /api/gappers/news-summaries", () => {
   beforeEach(() => {
     mocks.batchSummarizeGapperNews.mockReset();
     mocks.collectGapperNewsSources.mockReset();
+    mocks.createGrokNewsSearchProvider.mockReset();
+    mocks.createMarketauxNewsSearchProvider.mockReset();
     mocks.createOpenAiNewsSummaryProvider.mockReset();
     mocks.createOpenAiWebNewsSearchProvider.mockReset();
     mocks.createXNewsSearchProvider.mockReset();
@@ -73,6 +83,8 @@ describe("POST /api/gappers/news-summaries", () => {
       enabled: false,
       provider: "openai",
     });
+    mocks.getNewsSummaryMarketauxConfig.mockReturnValue({ enabled: false });
+    mocks.getNewsSummaryGrokConfig.mockReturnValue({ enabled: false });
     mocks.getNewsSummaryXConfig.mockReturnValue({ enabled: false });
     mocks.getCurrentUser.mockResolvedValue({
       email: "owner@example.com",
@@ -261,11 +273,12 @@ describe("POST /api/gappers/news-summaries", () => {
       ticker: "ACME",
     });
     expect(mocks.collectGapperNewsSources).toHaveBeenCalledWith({
+      grokProvider: null,
       massiveNews: [article],
+      marketauxProvider: null,
       previousCloseAt: "2026-06-03T20:00:00.000Z",
       symbol: "ACME",
       webProvider: null,
-      xProvider: null,
     });
     expect(mocks.batchSummarizeGapperNews).toHaveBeenCalledWith(
       expect.objectContaining({
@@ -280,6 +293,83 @@ describe("POST /api/gappers/news-summaries", () => {
         ],
       }),
     );
+  });
+
+  it("wires configured Marketaux, OpenAI web, and Grok fallback providers in cascade order", async () => {
+    const marketauxProvider = { search: vi.fn() };
+    const webProvider = { search: vi.fn() };
+    const grokProvider = { search: vi.fn() };
+    mocks.getNewsSummaryMarketauxConfig.mockReturnValue({
+      apiKey: "marketaux-key",
+      baseUrl: "https://api.marketaux.com/v1",
+      enabled: true,
+    });
+    mocks.getNewsSummaryWebSearchConfig.mockReturnValue({
+      apiKey: "openai-key",
+      enabled: true,
+      provider: "openai",
+    });
+    mocks.getNewsSummaryGrokConfig.mockReturnValue({
+      apiKey: "xai-key",
+      baseUrl: "https://api.x.ai/v1",
+      enabled: true,
+      model: "grok-4.3",
+    });
+    mocks.createMarketauxNewsSearchProvider.mockReturnValue(marketauxProvider);
+    mocks.createOpenAiWebNewsSearchProvider.mockReturnValue(webProvider);
+    mocks.createGrokNewsSearchProvider.mockReturnValue(grokProvider);
+    mocks.getTickerNews.mockResolvedValue([]);
+    mocks.collectGapperNewsSources.mockResolvedValue({
+      layer: "none",
+      sources: [],
+    });
+    mocks.batchSummarizeGapperNews.mockResolvedValue([
+      {
+        message:
+          "No Massive, Marketaux, OpenAI web, or Grok context found after previous close.",
+        sourceLayer: "none",
+        status: "no_news",
+        symbol: "ACME",
+      },
+    ]);
+
+    const response = await POST(
+      new Request("http://localhost/api/gappers/news-summaries", {
+        body: JSON.stringify({
+          model: "gpt-4o-mini",
+          provider: "openai",
+          tickers: [
+            {
+              previousCloseAt: "2026-06-03T20:00:00.000Z",
+              symbol: "acme",
+            },
+          ],
+        }),
+        method: "POST",
+      }),
+    );
+
+    expect(response.status).toBe(200);
+    expect(mocks.createMarketauxNewsSearchProvider).toHaveBeenCalledWith({
+      apiKey: "marketaux-key",
+      baseUrl: "https://api.marketaux.com/v1",
+    });
+    expect(mocks.createOpenAiWebNewsSearchProvider).toHaveBeenCalledWith({
+      apiKey: "openai-key",
+    });
+    expect(mocks.createGrokNewsSearchProvider).toHaveBeenCalledWith({
+      apiKey: "xai-key",
+      baseUrl: "https://api.x.ai/v1",
+      model: "grok-4.3",
+    });
+    expect(mocks.collectGapperNewsSources).toHaveBeenCalledWith({
+      grokProvider,
+      massiveNews: [],
+      marketauxProvider,
+      previousCloseAt: "2026-06-03T20:00:00.000Z",
+      symbol: "ACME",
+      webProvider,
+    });
   });
 
   it("returns JSON when fetching ticker news fails", async () => {

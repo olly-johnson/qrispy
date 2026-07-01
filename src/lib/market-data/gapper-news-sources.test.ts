@@ -2,6 +2,8 @@ import { describe, expect, it, vi } from "vitest";
 
 import {
   collectGapperNewsSources,
+  createGrokNewsSearchProvider,
+  createMarketauxNewsSearchProvider,
   createOpenAiWebNewsSearchProvider,
   createXNewsSearchProvider,
   type NewsSourceProvider,
@@ -17,17 +19,19 @@ describe("collectGapperNewsSources", () => {
     title: "Acme contract",
   };
 
-  it("uses Massive results and does not call web or X", async () => {
+  it("uses Massive results and does not call Marketaux, web, or Grok", async () => {
+    const marketaux: NewsSourceProvider = { search: vi.fn() };
     const web: NewsSourceProvider = { search: vi.fn() };
-    const x: NewsSourceProvider = { search: vi.fn() };
+    const grok: NewsSourceProvider = { search: vi.fn() };
 
     await expect(
       collectGapperNewsSources({
         massiveNews: [massiveArticle],
+        marketauxProvider: marketaux,
         previousCloseAt: "2026-06-15T20:00:00.000Z",
         symbol: "ACME",
         webProvider: web,
-        xProvider: x,
+        grokProvider: grok,
       }),
     ).resolves.toEqual({
       layer: "massive",
@@ -40,11 +44,12 @@ describe("collectGapperNewsSources", () => {
       ],
     });
 
+    expect(marketaux.search).not.toHaveBeenCalled();
     expect(web.search).not.toHaveBeenCalled();
-    expect(x.search).not.toHaveBeenCalled();
+    expect(grok.search).not.toHaveBeenCalled();
   });
 
-  it("falls through to web when Massive only returns broad multi-ticker market articles", async () => {
+  it("falls through to Marketaux when Massive only returns broad multi-ticker market articles", async () => {
     const broadMassiveArticle = {
       articleUrl: "https://massive.test/semis-etf",
       description:
@@ -54,63 +59,103 @@ describe("collectGapperNewsSources", () => {
       tickers: ["ACME", "NVDA", "AMD", "INTC", "QCOM"],
       title: "This Tech ETF Has More than Doubled in 2026",
     };
-    const webSource = source("web");
-    const web: NewsSourceProvider = { search: vi.fn(async () => [webSource]) };
-    const x: NewsSourceProvider = { search: vi.fn() };
+    const marketauxSource = source("marketaux");
+    const marketaux: NewsSourceProvider = {
+      search: vi.fn(async () => [marketauxSource]),
+    };
+    const web: NewsSourceProvider = { search: vi.fn() };
+    const grok: NewsSourceProvider = { search: vi.fn() };
 
     await expect(
       collectGapperNewsSources({
         massiveNews: [broadMassiveArticle],
+        marketauxProvider: marketaux,
         previousCloseAt: "2026-06-15T20:00:00.000Z",
         symbol: "ACME",
         webProvider: web,
-        xProvider: x,
+        grokProvider: grok,
       }),
-    ).resolves.toEqual({ layer: "web", sources: [webSource] });
+    ).resolves.toEqual({ layer: "marketaux", sources: [marketauxSource] });
 
-    expect(web.search).toHaveBeenCalledWith({
+    expect(marketaux.search).toHaveBeenCalledWith({
       previousCloseAt: "2026-06-15T20:00:00.000Z",
       symbol: "ACME",
     });
-    expect(x.search).not.toHaveBeenCalled();
+    expect(web.search).not.toHaveBeenCalled();
+    expect(grok.search).not.toHaveBeenCalled();
   });
 
-  it("uses web when Massive is empty and does not call X", async () => {
+  it("uses Marketaux when Massive is empty and does not call web or Grok", async () => {
+    const marketauxSource = source("marketaux");
+    const marketaux: NewsSourceProvider = {
+      search: vi.fn(async () => [marketauxSource]),
+    };
+    const web: NewsSourceProvider = { search: vi.fn() };
+    const grok: NewsSourceProvider = { search: vi.fn() };
+
+    await expect(
+      collectGapperNewsSources({
+        massiveNews: [],
+        marketauxProvider: marketaux,
+        previousCloseAt: "2026-06-15T20:00:00.000Z",
+        symbol: "ACME",
+        webProvider: web,
+        grokProvider: grok,
+      }),
+    ).resolves.toEqual({ layer: "marketaux", sources: [marketauxSource] });
+
+    expect(marketaux.search).toHaveBeenCalledWith({
+      previousCloseAt: "2026-06-15T20:00:00.000Z",
+      symbol: "ACME",
+    });
+    expect(web.search).not.toHaveBeenCalled();
+    expect(grok.search).not.toHaveBeenCalled();
+  });
+
+  it("uses web when Massive and Marketaux are empty and does not call Grok", async () => {
+    const marketaux: NewsSourceProvider = { search: vi.fn(async () => []) };
     const webSource = source("web");
     const web: NewsSourceProvider = { search: vi.fn(async () => [webSource]) };
-    const x: NewsSourceProvider = { search: vi.fn() };
+    const grok: NewsSourceProvider = { search: vi.fn() };
 
     await expect(
       collectGapperNewsSources({
         massiveNews: [],
+        marketauxProvider: marketaux,
         previousCloseAt: "2026-06-15T20:00:00.000Z",
         symbol: "ACME",
         webProvider: web,
-        xProvider: x,
+        grokProvider: grok,
       }),
     ).resolves.toEqual({ layer: "web", sources: [webSource] });
 
+    expect(marketaux.search).toHaveBeenCalledWith({
+      previousCloseAt: "2026-06-15T20:00:00.000Z",
+      symbol: "ACME",
+    });
     expect(web.search).toHaveBeenCalledWith({
       previousCloseAt: "2026-06-15T20:00:00.000Z",
       symbol: "ACME",
     });
-    expect(x.search).not.toHaveBeenCalled();
+    expect(grok.search).not.toHaveBeenCalled();
   });
 
-  it("uses X only when Massive and web are empty", async () => {
-    const xSource = source("x");
+  it("uses Grok only when Massive, Marketaux, and web are empty", async () => {
+    const marketaux: NewsSourceProvider = { search: vi.fn(async () => []) };
     const web: NewsSourceProvider = { search: vi.fn(async () => []) };
-    const x: NewsSourceProvider = { search: vi.fn(async () => [xSource]) };
+    const grokSource = source("grok");
+    const grok: NewsSourceProvider = { search: vi.fn(async () => [grokSource]) };
 
     await expect(
       collectGapperNewsSources({
         massiveNews: [],
+        marketauxProvider: marketaux,
         previousCloseAt: "2026-06-15T20:00:00.000Z",
         symbol: "ACME",
         webProvider: web,
-        xProvider: x,
+        grokProvider: grok,
       }),
-    ).resolves.toEqual({ layer: "x", sources: [xSource] });
+    ).resolves.toEqual({ layer: "grok", sources: [grokSource] });
   });
 
   it("returns none when every configured layer is empty", async () => {
@@ -123,23 +168,99 @@ describe("collectGapperNewsSources", () => {
     ).resolves.toEqual({ layer: "none", sources: [] });
   });
 
-  it("returns none when the optional X fallback is unavailable", async () => {
+  it("returns none when the optional Grok fallback is unavailable", async () => {
+    const marketaux: NewsSourceProvider = { search: vi.fn(async () => []) };
     const web: NewsSourceProvider = { search: vi.fn(async () => []) };
-    const x: NewsSourceProvider = {
+    const grok: NewsSourceProvider = {
       search: vi.fn(async () => {
-        throw new Error("X news search request failed with 403");
+        throw new Error("Grok news search request failed with 403");
       }),
     };
 
     await expect(
       collectGapperNewsSources({
         massiveNews: [],
+        marketauxProvider: marketaux,
         previousCloseAt: "2026-06-15T20:00:00.000Z",
         symbol: "ACME",
         webProvider: web,
-        xProvider: x,
+        grokProvider: grok,
       }),
     ).resolves.toEqual({ layer: "none", sources: [] });
+  });
+});
+
+describe("createMarketauxNewsSearchProvider", () => {
+  it("searches ticker news after the previous close and normalizes entity highlights", async () => {
+    const fetcher = vi.fn().mockResolvedValue(
+      new Response(
+        JSON.stringify({
+          data: [
+            {
+              description: "Acme shares rise after announcing a new contract.",
+              entities: [
+                {
+                  highlights: [
+                    {
+                      highlight: "Acme announced a new AI server contract.",
+                      highlighted_in: "main_text",
+                      sentiment: 0.7,
+                    },
+                  ],
+                  match_score: 93,
+                  symbol: "ACME",
+                },
+              ],
+              published_at: "2026-06-16T12:30:00.000Z",
+              source: "example.com",
+              title: "Acme jumps on AI server contract",
+              url: "https://example.com/acme-contract",
+              uuid: "marketaux-1",
+            },
+            {
+              description: "Old Acme item.",
+              published_at: "2026-06-15T19:59:59.000Z",
+              source: "example.com",
+              title: "Old Acme earnings",
+              url: "https://example.com/old-acme",
+              uuid: "old-1",
+            },
+          ],
+        }),
+        { status: 200 },
+      ),
+    );
+    const provider = createMarketauxNewsSearchProvider({
+      apiKey: "marketaux-key",
+      fetcher,
+    });
+
+    await expect(
+      provider.search({
+        previousCloseAt: "2026-06-15T20:00:00.000Z",
+        symbol: "ACME",
+      }),
+    ).resolves.toEqual([
+      {
+        id: "marketaux:marketaux-1",
+        layer: "marketaux",
+        publishedUtc: "2026-06-16T12:30:00.000Z",
+        publisher: "example.com",
+        snippet: "Acme announced a new AI server contract.",
+        title: "Acme jumps on AI server contract",
+        url: "https://example.com/acme-contract",
+      },
+    ]);
+
+    const [url] = fetcher.mock.calls[0];
+    const requestUrl = new URL(url);
+    expect(requestUrl.toString()).toContain("https://api.marketaux.com/v1/news/all");
+    expect(requestUrl.searchParams.get("api_token")).toBe("marketaux-key");
+    expect(requestUrl.searchParams.get("symbols")).toBe("ACME");
+    expect(requestUrl.searchParams.get("published_after")).toBe(
+      "2026-06-15T20:00:00.000Z",
+    );
+    expect(requestUrl.searchParams.get("filter_entities")).toBe("true");
   });
 });
 
@@ -220,7 +341,7 @@ describe("createOpenAiWebNewsSearchProvider", () => {
     });
   });
 
-  it("falls through to X when every web finding is stale", async () => {
+  it("falls through to Grok when every web finding is stale", async () => {
     const web = createOpenAiWebNewsSearchProvider({
       apiKey: "openai-key",
       fetcher: vi.fn().mockResolvedValue(
@@ -256,18 +377,78 @@ describe("createOpenAiWebNewsSearchProvider", () => {
         ),
       ),
     });
-    const xSource = source("x");
-    const x: NewsSourceProvider = { search: vi.fn(async () => [xSource]) };
+    const marketaux: NewsSourceProvider = { search: vi.fn(async () => []) };
+    const grokSource = source("grok");
+    const grok: NewsSourceProvider = { search: vi.fn(async () => [grokSource]) };
 
     await expect(
       collectGapperNewsSources({
         massiveNews: [],
+        marketauxProvider: marketaux,
         previousCloseAt: "2026-06-15T20:00:00.000Z",
         symbol: "ACME",
         webProvider: web,
-        xProvider: x,
+        grokProvider: grok,
       }),
-    ).resolves.toEqual({ layer: "x", sources: [xSource] });
+    ).resolves.toEqual({ layer: "grok", sources: [grokSource] });
+  });
+});
+
+describe("createGrokNewsSearchProvider", () => {
+  it("uses xAI Responses with X search after the previous close", async () => {
+    const fetcher = vi.fn().mockResolvedValue(
+      new Response(
+        JSON.stringify({
+          output_text: JSON.stringify({
+            sources: [
+              {
+                publishedUtc: "2026-06-16T12:30:00.000Z",
+                publisher: "@marketnews",
+                summary: "$ACME moving with NVDA earnings.",
+                title: "@marketnews",
+                url: "https://x.com/marketnews/status/1",
+              },
+            ],
+          }),
+        }),
+        { status: 200 },
+      ),
+    );
+    const provider = createGrokNewsSearchProvider({
+      apiKey: "xai-key",
+      fetcher,
+      model: "grok-4.3",
+    });
+
+    await expect(
+      provider.search({
+        previousCloseAt: "2026-06-15T20:00:00.000Z",
+        symbol: "ACME",
+      }),
+    ).resolves.toEqual([
+      {
+        id: "grok:0:https://x.com/marketnews/status/1",
+        layer: "grok",
+        publishedUtc: "2026-06-16T12:30:00.000Z",
+        publisher: "@marketnews",
+        snippet: "$ACME moving with NVDA earnings.",
+        title: "@marketnews",
+        url: "https://x.com/marketnews/status/1",
+      },
+    ]);
+
+    const [url, options] = fetcher.mock.calls[0];
+    expect(url).toBe("https://api.x.ai/v1/responses");
+    expect(options.headers.authorization).toBe("Bearer xai-key");
+    expect(JSON.parse(options.body)).toMatchObject({
+      model: "grok-4.3",
+      tools: [
+        {
+          from_date: "2026-06-15",
+          type: "x_search",
+        },
+      ],
+    });
   });
 });
 
@@ -318,19 +499,22 @@ describe("createXNewsSearchProvider", () => {
   });
 });
 
-function source(layer: "web" | "x") {
+function source(layer: "grok" | "marketaux" | "web" | "x") {
   return {
     id: `${layer}:1`,
     layer,
-    publishedUtc: layer === "x" ? "2026-06-16T12:30:00.000Z" : null,
-    publisher: layer === "x" ? "@marketnews" : "Example",
+    publishedUtc:
+      layer === "x" || layer === "grok" || layer === "marketaux"
+        ? "2026-06-16T12:30:00.000Z"
+        : null,
+    publisher: layer === "x" || layer === "grok" ? "@marketnews" : "Example",
     snippet:
-      layer === "x"
+      layer === "x" || layer === "grok"
         ? "$ACME moving with NVDA earnings."
         : "Acme is up on AI server demand.",
-    title: layer === "x" ? "@marketnews" : "Why Acme is up",
+    title: layer === "x" || layer === "grok" ? "@marketnews" : "Why Acme is up",
     url:
-      layer === "x"
+      layer === "x" || layer === "grok"
         ? "https://x.com/marketnews/status/1"
         : "https://example.com/acme",
   };

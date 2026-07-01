@@ -2,7 +2,9 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 
 import {
   getMarketContextConfig,
+  getNewsSummaryGrokConfig,
   getNewsSummaryLlmConfig,
+  getNewsSummaryMarketauxConfig,
   getNewsSummaryWebSearchConfig,
   getNewsSummaryXConfig,
 } from "./env";
@@ -84,6 +86,80 @@ describe("getNewsSummaryWebSearchConfig", () => {
       enabled: false,
       provider: "openai",
     });
+  });
+});
+
+describe("getNewsSummaryMarketauxConfig", () => {
+  afterEach(() => {
+    vi.unstubAllEnvs();
+  });
+
+  it("enables Marketaux when requested with an API key", () => {
+    vi.stubEnv("NEWS_SUMMARY_MARKETAUX_ENABLED", "true");
+    vi.stubEnv("MARKETAUX_API_KEY", "marketaux-key");
+
+    expect(getNewsSummaryMarketauxConfig()).toEqual({
+      apiKey: "marketaux-key",
+      baseUrl: "https://api.marketaux.com/v1",
+      enabled: true,
+    });
+  });
+
+  it("accepts MARKETAUX_API_TOKEN as an alias", () => {
+    vi.stubEnv("NEWS_SUMMARY_MARKETAUX_ENABLED", "true");
+    vi.stubEnv("MARKETAUX_API_TOKEN", "marketaux-token");
+
+    expect(getNewsSummaryMarketauxConfig()).toEqual({
+      apiKey: "marketaux-token",
+      baseUrl: "https://api.marketaux.com/v1",
+      enabled: true,
+    });
+  });
+
+  it("skips Marketaux when disabled or missing a key", () => {
+    vi.stubEnv("NEWS_SUMMARY_MARKETAUX_ENABLED", "true");
+    vi.stubEnv("MARKETAUX_API_KEY", "");
+
+    expect(getNewsSummaryMarketauxConfig()).toEqual({ enabled: false });
+  });
+});
+
+describe("getNewsSummaryGrokConfig", () => {
+  afterEach(() => {
+    vi.unstubAllEnvs();
+  });
+
+  it("enables Grok when requested with an xAI key", () => {
+    vi.stubEnv("NEWS_SUMMARY_GROK_ENABLED", "true");
+    vi.stubEnv("XAI_API_KEY", "xai-key");
+
+    expect(getNewsSummaryGrokConfig()).toEqual({
+      apiKey: "xai-key",
+      baseUrl: "https://api.x.ai/v1",
+      enabled: true,
+      model: "grok-4.3",
+    });
+  });
+
+  it("preserves a configured Grok model and base URL", () => {
+    vi.stubEnv("NEWS_SUMMARY_GROK_ENABLED", "true");
+    vi.stubEnv("XAI_API_KEY", "xai-key");
+    vi.stubEnv("XAI_API_BASE_URL", "https://example.x.ai/v1/");
+    vi.stubEnv("NEWS_SUMMARY_GROK_MODEL", "grok-4.3-fast");
+
+    expect(getNewsSummaryGrokConfig()).toEqual({
+      apiKey: "xai-key",
+      baseUrl: "https://example.x.ai/v1",
+      enabled: true,
+      model: "grok-4.3-fast",
+    });
+  });
+
+  it("skips Grok when disabled or missing a key", () => {
+    vi.stubEnv("NEWS_SUMMARY_GROK_ENABLED", "true");
+    vi.stubEnv("XAI_API_KEY", "");
+
+    expect(getNewsSummaryGrokConfig()).toEqual({ enabled: false });
   });
 });
 

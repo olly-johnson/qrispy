@@ -282,14 +282,15 @@ describe("gapper summary cache", () => {
       },
     ];
     const result = {
-      message: "No Massive, web, or X context found after previous close.",
+      message:
+        "No Massive, Marketaux, OpenAI web, or Grok context found after previous close.",
       sourceLayer: "none" as const,
       status: "no_news" as const,
       symbol: "ACME",
     };
 
     storage.setItem(
-      "qrispy:gapper-news-summary:v3:openai:gpt-4o-mini:ACME:2026-06-15T20:00:00.000Z",
+      "qrispy:gapper-news-summary:v4:openai:gpt-4o-mini:ACME:2026-06-15T20:00:00.000Z",
       JSON.stringify({ result, savedAt: 1000 }),
     );
 
